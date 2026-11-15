@@ -28,8 +28,9 @@ try { [void][DpiAware]::SetProcessDPIAware() } catch {}
 
 # ---------------------------------------------------------------- paths
 $Base         = Split-Path -Parent $MyInvocation.MyCommand.Path
-if (-not $Base) { $Base = 'D:\DeepSeek\workspace\orb' }
-$SchedulePath = 'D:\DeepSeek\workspace\desktop-calendar\schedule.json'
+if (-not $Base) { $Base = (Get-Location).Path }
+# optional external timetable file; if it is missing the schedule pane just shows empty
+$SchedulePath = Join-Path (Split-Path $Base -Parent) 'desktop-calendar\schedule.json'
 $NotesPath    = Join-Path $Base 'notes.json'
 $StatePath    = Join-Path $Base 'state.json'
 
@@ -816,22 +817,34 @@ function Get-LhmCpuTemp {
 function Get-LhmGpuLoad {
     if (-not $script:LhmComputer) { return $null }
     try {
-        # Machines can have several adapters (e.g. AMD iGPU + NVIDIA dGPU, or a
-        # laptop with only integrated graphics). Take the busiest "GPU Core" load
-        # so we always show the adapter that is actually working.
-        $max = $null
+        $entries = @()
         foreach ($h in $script:LhmComputer.Hardware) {
-            if ("$($h.HardwareType)" -notmatch 'Gpu') { continue }
+            $type = "$($h.HardwareType)"
+            if ($type -notmatch 'Gpu') { continue }
             $h.Update()
+            $load = $null
             foreach ($s in $h.Sensors) {
-                if ("$($s.SensorType)" -ne 'Load') { continue }
-                if ("$($s.Name)" -ne 'GPU Core') { continue }
-                if ($null -eq $s.Value) { continue }
-                $v = [double]$s.Value
-                if ($null -eq $max -or $v -gt $max) { $max = $v }
+                if ("$($s.SensorType)" -eq 'Load' -and "$($s.Name)" -eq 'GPU Core' -and $null -ne $s.Value) {
+                    $load = [double]$s.Value
+                    break
+                }
+            }
+            if ($null -ne $load) {
+                $entries += [pscustomobject]@{ Type = $type; Name = "$($h.Name)"; Load = $load }
             }
         }
-        return $max
+        if ($entries.Count -eq 0) { return $null }
+
+        # 1) NVIDIA adapters are always discrete - prefer them
+        $nv = $entries | Where-Object { $_.Type -eq 'GpuNvidia' } | Select-Object -First 1
+        if ($nv) { return $nv.Load }
+
+        # 2) discrete AMD / Intel cards usually carry "RX " / "Radeon Pro" / "Arc "
+        $disc = $entries | Where-Object { $_.Name -match 'RX |Radeon Pro|Arc ' } | Select-Object -First 1
+        if ($disc) { return $disc.Load }
+
+        # 3) single-adapter or integrated-only machine: take the busiest one
+        return ($entries | Sort-Object -Property Load -Descending | Select-Object -First 1).Load
     } catch {}
     return $null
 }
