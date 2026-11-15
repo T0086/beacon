@@ -1,4 +1,4 @@
-# 日程球 安装脚本
+﻿# beacon 安装脚本
 # 用法：双击「安装.bat」，或右键此文件 → 使用 PowerShell 运行
 $ErrorActionPreference = 'Stop'
 
@@ -13,7 +13,7 @@ if (-not $isAdmin) {
 }
 
 $src = Join-Path $PSScriptRoot 'app'
-$dst = Join-Path $env:LOCALAPPDATA 'schedule-orb'
+$dst = Join-Path $env:LOCALAPPDATA 'beacon'
 
 if (-not (Test-Path $src)) {
     Write-Host "错误：找不到 app 目录。请把整个安装包解压后再运行。"
@@ -22,13 +22,13 @@ if (-not (Test-Path $src)) {
 }
 
 Write-Host ""
-Write-Host "=== 日程球 安装 ===" -ForegroundColor Cyan
+Write-Host "=== beacon 安装 ===" -ForegroundColor Cyan
 Write-Host "目标目录: $dst"
 Write-Host ""
 
 # ---------------------------------------------------------------- stop running instance
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -match 'orb\.ps1' } |
+    Where-Object { $_.CommandLine -match 'beacon\.ps1' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Milliseconds 800
 
@@ -44,7 +44,7 @@ Copy-Item "$src\*" $dst -Recurse -Force
 Write-Host "[1/4] 文件已复制"
 
 # ---------------------------------------------------------------- scheduled task (elevated, needed for LHM temperature)
-$vbs = Join-Path $dst '启动 日程球.vbs'
+$vbs = Join-Path $dst '启动 beacon.vbs'
 if (-not (Test-Path $vbs)) {
     Write-Host "错误：找不到启动器 $vbs"
     Read-Host "按回车退出"
@@ -62,13 +62,13 @@ $settings = New-ScheduledTaskSettingsSet `
     -DontStopIfGoingOnBatteries `
     -DontStopOnIdleEnd
 
-Register-ScheduledTask -TaskName 'Schedule Orb' -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName 'Beacon' -Action $action -Trigger $trigger `
     -Principal $principal -Settings $settings `
-    -Description 'schedule-orb: floating desktop widget (elevated for hardware sensors)' -Force | Out-Null
+    -Description 'beacon: floating desktop widget (elevated for hardware sensors)' -Force | Out-Null
 Write-Host "[2/4] 计划任务已创建（登录时自动启动，最高权限）"
 
 # ---------------------------------------------------------------- drop the old startup shortcut
-$lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\日程球.lnk'
+$lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\beacon.lnk'
 if (Test-Path $lnk) {
     Remove-Item $lnk -Force -ErrorAction SilentlyContinue
     Write-Host "[3/4] 已移除旧的启动文件夹快捷方式"
@@ -77,10 +77,10 @@ if (Test-Path $lnk) {
 }
 
 # ---------------------------------------------------------------- start it
-Start-ScheduledTask -TaskName 'Schedule Orb'
+Start-ScheduledTask -TaskName 'Beacon'
 Start-Sleep -Seconds 4
 $running = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -match 'orb\.ps1' }).Count
+    Where-Object { $_.CommandLine -match 'beacon\.ps1' }).Count
 Write-Host "[4/4] 已启动（检测到 $running 个实例）"
 
 Write-Host ""
@@ -91,6 +91,6 @@ Write-Host "  - 桌面上会出现一条悬浮长条，位置在屏幕右上角�
 Write-Host "  - 点「设置」齿轮可以粘贴 .ics 日历链接导入课程表"
 Write-Host "  - 第一次读 CPU 温度可能需要几秒"
 Write-Host ""
-Write-Host "卸载：删除计划任务「Schedule Orb」和目录 $dst 即可。"
+Write-Host "卸载：删除计划任务「Beacon」和目录 $dst 即可。"
 Write-Host ""
 Read-Host "按回车关闭"
