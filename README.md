@@ -38,9 +38,12 @@ PowerShell + WPF 写的，一个脚本跑起来，不编译、不装运行时。
 | 组件 | 用途 | 说明 |
 |---|---|---|
 | PowerShell 5.1 | 运行环境 | Windows 10/11 自带 |
-| [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) **0.9.3** | CPU/GPU 温度 | 已内置于 `app/lib/`，MPL 2.0 |
-| `nvidia-smi` | GPU 占用 | NVIDIA 驱动自带，没有就显示 `--` |
+| [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) **0.9.3** | CPU/GPU 温度、GPU 占用 | 已内置于 `app/lib/`，MPL 2.0 |
+| `nvidia-smi` | GPU 占用（后备） | NVIDIA 驱动自带；没有就回落到 LHM |
 | [Open-Meteo](https://open-meteo.com) | 天气 | 免费接口，无需 key |
+
+> **笔记本适配**：GPU 占用走 LHM，所以**核显（Intel / AMD Radeon）也能读**，不依赖 `nvidia-smi`。
+> 双显卡机器（核显 + 独显）会自动取两者中更忙的那个，显示真正在干活的那块。
 
 > **为什么用 0.9.3 而不是最新版？**
 > 0.9.6 开始依赖 [PawnIO](https://pawnio.eu) 内核驱动，装起来要跟杀软、驱动签名、UAC 三重门纠缠（实测在火绒环境下安装器直接返回 `0xC0000022`）。
