@@ -33,6 +33,8 @@ if (-not $Base) { $Base = (Get-Location).Path }
 $SchedulePath = Join-Path (Split-Path $Base -Parent) 'desktop-calendar\schedule.json'
 $NotesPath    = Join-Path $Base 'notes.json'
 $StatePath    = Join-Path $Base 'state.json'
+$CtlDir       = Join-Path $Base 'ctl'
+if (-not (Test-Path $CtlDir)) { New-Item -ItemType Directory -Path $CtlDir -Force | Out-Null }
 
 # ---------------------------------------------------------------- helpers
 function Brush([string]$hex) {
@@ -761,7 +763,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.4 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.5 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -2504,6 +2506,20 @@ $metricTimer.Interval = [TimeSpan]::FromSeconds(2)
 $metricTimer.Add_Tick({ Update-Orb })
 $metricTimer.Start()
 
+# ---------------------------------------------------------------- graceful shutdown
+# The tray icon only goes away if the process disposes it itself; Stop-Process leaves a
+# ghost. Every shutdown path therefore funnels through this one function.
+function Invoke-BeaconStop {
+    try { Save-State } catch {}
+    try { $ni.Visible = $false; $ni.Dispose() } catch {}
+    try { $script:OrbMutex.ReleaseMutex() } catch {}
+    try { $w.Close() } catch {}
+    # closing the window alone does not always end the process, and a lingering
+    # process is what leaves the ghost tray icon behind
+    try { [System.Windows.Application]::Current.Shutdown() } catch {}
+    [Environment]::Exit(0)
+}
+
 # graceful shutdown channel: writing quit.flag lets a restart dispose the tray icon
 # properly instead of leaving a ghost behind (Stop-Process can't clean up NotifyIcon)
 $quitWatcher = New-Object System.Windows.Threading.DispatcherTimer
@@ -2512,17 +2528,87 @@ $quitWatcher.Add_Tick({
     $qf = Join-Path $Base 'quit.flag'
     if (Test-Path $qf) {
         Remove-Item $qf -Force -ErrorAction SilentlyContinue
-        try { Save-State } catch {}
-        try { $ni.Visible = $false; $ni.Dispose() } catch {}
-        try { $script:OrbMutex.ReleaseMutex() } catch {}
-        try { $w.Close() } catch {}
-        # closing the window alone does not always end the process, and a lingering
-        # process is what leaves the ghost tray icon behind
-        try { [System.Windows.Application]::Current.Shutdown() } catch {}
-        [Environment]::Exit(0)
+        Invoke-BeaconStop
     }
 })
 $quitWatcher.Start()
+
+# ---------------------------------------------------------------- control channel
+# This process is meant to outlive the shells that talk to it, so nobody holds a handle
+# to it. Both sides use files under ctl\ instead:
+#   cmd.txt      verbs to run, one per line; consumed and deleted by beacon
+#   status.json  heartbeat rewritten every 2s (pid, startedAt, uptimeSec, expanded, locked)
+#   result.txt   outcome of the last verb, tab separated
+$script:StartedAt = Get-Date
+
+function Write-CtlFile([string]$Name, [string]$Text) {
+    $path = Join-Path $CtlDir $Name
+    $tmp  = "$path.tmp"
+    [System.IO.File]::WriteAllText($tmp, $Text, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $tmp -Destination $path -Force
+}
+
+function Write-CtlResult([string]$Verb, [string]$Status) {
+    try {
+        $at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        Write-CtlFile 'result.txt' "$at`t$Verb`t$Status"
+    } catch {}
+}
+
+function Write-BeaconHeartbeat {
+    try {
+        $up = [int]((Get-Date) - $script:StartedAt).TotalSeconds
+        $exp = 'false'
+        if ($script:IsOpen) { $exp = 'true' }
+        $lck = 'false'
+        if ($script:Locked) { $lck = 'true' }
+        $hb = '{"pid":' + $PID +
+              ',"startedAt":"' + $script:StartedAt.ToString('yyyy-MM-dd HH:mm:ss') + '"' +
+              ',"uptimeSec":' + $up +
+              ',"expanded":' + $exp +
+              ',"locked":' + $lck +
+              ',"at":"' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + '"}'
+        Write-CtlFile 'status.json' $hb
+    } catch {}
+}
+
+function Invoke-CtlCommand([string]$Verb, [string]$Arg) {
+    switch ($Verb) {
+        'stop'     { Write-CtlResult 'stop' 'ok'; Invoke-BeaconStop }
+        'expand'   { if (-not $w.IsVisible) { $w.Show() }; Expand-Orb; Write-CtlResult 'expand' 'ok' }
+        'collapse' { Collapse-Orb; Write-CtlResult 'collapse' 'ok' }
+        'lock'     { $script:Locked = $true; Update-LockUI; Write-CtlResult 'lock' 'ok' }
+        'unlock'   { $script:Locked = $false; Update-LockUI; Write-CtlResult 'unlock' 'ok' }
+        'refresh'  { if ($script:IsOpen) { Render-Classes }; Write-CtlResult 'refresh' 'ok' }
+        'ping'     { Write-CtlResult 'ping' 'ok' }
+        default    { Write-CtlResult $Verb 'unknown' }
+    }
+}
+
+$ctlTimer = New-Object System.Windows.Threading.DispatcherTimer
+$ctlTimer.Interval = [TimeSpan]::FromSeconds(2)
+$ctlTimer.Add_Tick({
+    Write-BeaconHeartbeat
+    $cmdFile = Join-Path $CtlDir 'cmd.txt'
+    if (-not (Test-Path $cmdFile)) { return }
+    $lines = @()
+    try { $lines = @(Get-Content -LiteralPath $cmdFile -ErrorAction Stop) } catch { return }
+    Remove-Item -LiteralPath $cmdFile -Force -ErrorAction SilentlyContinue
+    foreach ($line in $lines) {
+        $text = ([string]$line).Trim()
+        if (-not $text) { continue }
+        $parts = @($text -split '\s+', 2)
+        $verb  = ([string]$parts[0]).ToLower()
+        $arg   = ''
+        if ($parts.Count -gt 1) { $arg = [string]$parts[1] }
+        try { Invoke-CtlCommand $verb $arg } catch {
+            try { Write-CtlResult $verb ('error: ' + $_.Exception.Message) } catch {}
+        }
+    }
+})
+$ctlTimer.Start()
+
+Write-BeaconHeartbeat
 
 # schedule refresh every 5min
 $timer = New-Object System.Windows.Threading.DispatcherTimer
