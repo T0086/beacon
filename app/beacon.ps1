@@ -761,7 +761,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.3 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.4 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -1330,7 +1330,7 @@ function Render-MvDayEvents {
     if ($evs.Count -eq 0 -and $dueNotes.Count -eq 0) {
         $t = New-Object System.Windows.Controls.TextBlock
         $t.Text = '这天没有安排'
-        $t.Foreground = Brush '#5E5E64'
+        $t.Foreground = Brush '#A8A8B0'
         $t.FontSize = 11
         $t.Margin = '2,4,0,0'
         $MvDayEvents.Children.Add($t) | Out-Null
@@ -1862,7 +1862,7 @@ function Render-Classes {
     if ($up.Count -eq 0) {
         $t = New-Object System.Windows.Controls.TextBlock
         $t.Text = '这一学期没有更多课程了'
-        $t.Foreground = Brush '#5E5E64'
+        $t.Foreground = Brush '#A8A8B0'
         $t.FontSize = 12
         $t.Margin = '6,24,0,0'
         $ClassList.Children.Add($t) | Out-Null
@@ -1901,7 +1901,7 @@ function Build-Calendar {
     foreach ($wd in @('日','一','二','三','四','五','六')) {
         $t = New-Object System.Windows.Controls.TextBlock
         $t.Text = $wd
-        $t.Foreground = Brush '#5E5E64'
+        $t.Foreground = Brush '#A8A8B0'
         $t.FontSize = 9.5
         $t.HorizontalAlignment = 'Center'
         $t.VerticalAlignment = 'Center'
@@ -1928,7 +1928,7 @@ function Build-Calendar {
         $btn.Padding = '0'
         $btn.BorderThickness = '0'
         $btn.Background = Brush 'Transparent'
-        $btn.Foreground = Brush '#D8D8DC'
+        $btn.Foreground = Brush '#F2F2F5'
         $btn.FontSize = 10.5
         $btn.Cursor = 'Hand'
         $btn.Tag = $key
@@ -1965,7 +1965,7 @@ function Render-Notes {
     if ($pending.Count -eq 0) {
         $t = New-Object System.Windows.Controls.TextBlock
         $t.Text = '还没有备忘'
-        $t.Foreground = Brush '#5E5E64'
+        $t.Foreground = Brush '#A8A8B0'
         $t.FontSize = 11.5
         $t.Margin = '5,6,0,0'
         $NoteList.Children.Add($t) | Out-Null
@@ -2157,7 +2157,7 @@ function Render-Settings {
     if (@($script:Sources).Count -eq 0) {
         $t = New-Object System.Windows.Controls.TextBlock
         $t.Text = '还没有导入任何日历'
-        $t.Foreground = Brush '#5E5E64'
+        $t.Foreground = Brush '#A8A8B0'
         $t.FontSize = 11
         $t.Margin = '2,6,0,0'
         $SetSourceList.Children.Add($t) | Out-Null
