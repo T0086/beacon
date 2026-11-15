@@ -262,13 +262,15 @@ function Format-DueShort($key) {
 }
 
 function Load-State {
-    $s = @{ Left = $null; Top = $null; GpuPick = 'auto' }
+    $s = @{ Left = $null; Top = $null; GpuPick = 'auto'; WeatherLat = $null; WeatherLon = $null }
     if (Test-Path $StatePath) {
         try {
             $o = Get-Content $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($null -ne $o.Left) { $s.Left = [double]$o.Left }
             if ($null -ne $o.Top)  { $s.Top  = [double]$o.Top }
             if ($null -ne $o.GpuPick -and "$($o.GpuPick)") { $s.GpuPick = [string]$o.GpuPick }
+            if ($null -ne $o.WeatherLat -and "$($o.WeatherLat)") { $s.WeatherLat = [double]$o.WeatherLat }
+            if ($null -ne $o.WeatherLon -and "$($o.WeatherLon)") { $s.WeatherLon = [double]$o.WeatherLon }
         } catch {}
     }
     return $s
@@ -276,9 +278,11 @@ function Load-State {
 
 function Save-State {
     $o = [pscustomobject]@{
-        Left    = [double]$w.Left
-        Top     = [double]$w.Top
-        GpuPick = [string]$script:GpuPick
+        Left       = [double]$w.Left
+        Top        = [double]$w.Top
+        GpuPick    = [string]$script:GpuPick
+        WeatherLat = $script:WeatherLat
+        WeatherLon = $script:WeatherLon
     }
     [System.IO.File]::WriteAllText($StatePath, ($o | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -562,7 +566,7 @@ $settingsXaml = @'
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="日程球 设置" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
-        Width="420" Height="500"
+        Width="640" Height="600"
         FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif">
   <Window.Resources>
     <Style TargetType="{x:Type ScrollBar}">
@@ -594,13 +598,10 @@ $settingsXaml = @'
     <Grid>
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
         <RowDefinition Height="*"/>
       </Grid.RowDefinitions>
 
-      <Grid x:Name="SetHeader" Grid.Row="0" Margin="20,16,14,12" Background="Transparent">
+      <Grid x:Name="SetHeader" Grid.Row="0" Margin="22,15,14,8" Background="Transparent">
         <TextBlock Text="设置" Foreground="#F5F5F7" FontSize="15" FontWeight="SemiBold"
                    VerticalAlignment="Center"/>
         <Button x:Name="SetCloseBtn" Content="✕" HorizontalAlignment="Right" Width="28" Height="28"
@@ -608,41 +609,122 @@ $settingsXaml = @'
                 FontSize="13" Cursor="Hand" Padding="0"/>
       </Grid>
 
-      <StackPanel Grid.Row="1" Margin="20,0,20,14">
-        <TextBlock Text="导入日程链接（.ics）" Foreground="#8A8A90" FontSize="11" Margin="0,0,0,8"/>
-        <Border CornerRadius="9" Background="#1FFFFFFF">
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*"/>
-              <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBox x:Name="SetUrlInput" Grid.Column="0" Background="Transparent" BorderThickness="0"
-                     Foreground="#F5F5F7" CaretBrush="#F5F5F7" Padding="11,9" FontSize="11.5"/>
-            <TextBlock x:Name="SetUrlHint" Grid.Column="0" Text="https://…" IsHitTestVisible="False"
-                       Foreground="#4E4E54" FontSize="11.5" Margin="13,0,0,0" VerticalAlignment="Center"/>
-            <Button x:Name="SetImportBtn" Grid.Column="1" Content="导入" Width="54" Height="30"
-                    Margin="0,0,4,0" Background="Transparent" Foreground="#0A84FF"
-                    BorderThickness="0" FontSize="11.5" Cursor="Hand" Padding="0"
-                    VerticalAlignment="Center"/>
-          </Grid>
+      <Grid Grid.Row="1">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="138"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="#0A0B0E" CornerRadius="0,0,0,16" Padding="10,2,10,12">
+          <StackPanel>
+            <Border x:Name="NavGpu" Tag="gpu" CornerRadius="8" Padding="11,8"
+                    Background="Transparent" Cursor="Hand">
+              <TextBlock x:Name="NavGpuText" Text="显卡监控" FontSize="12" Foreground="#8A8A90"/>
+            </Border>
+            <Border x:Name="NavLoc" Tag="loc" CornerRadius="8" Padding="11,8" Margin="0,2,0,0"
+                    Background="Transparent" Cursor="Hand">
+              <TextBlock x:Name="NavLocText" Text="天气位置" FontSize="12" Foreground="#8A8A90"/>
+            </Border>
+            <Border x:Name="NavCal" Tag="cal" CornerRadius="8" Padding="11,8" Margin="0,2,0,0"
+                    Background="Transparent" Cursor="Hand">
+              <TextBlock x:Name="NavCalText" Text="日历订阅" FontSize="12" Foreground="#8A8A90"/>
+            </Border>
+            <Border x:Name="NavAbout" Tag="about" CornerRadius="8" Padding="11,8" Margin="0,2,0,0"
+                    Background="Transparent" Cursor="Hand">
+              <TextBlock x:Name="NavAboutText" Text="关于" FontSize="12" Foreground="#8A8A90"/>
+            </Border>
+          </StackPanel>
         </Border>
-        <TextBlock x:Name="SetStatus" Text="" Foreground="#8A8A90" FontSize="10.5"
-                   Margin="2,8,0,0" TextWrapping="Wrap"/>
-      </StackPanel>
 
-      <StackPanel Grid.Row="2" Margin="20,0,20,14">
-        <TextBlock Text="显卡监控" Foreground="#8A8A90" FontSize="11" Margin="0,0,0,8"/>
-        <StackPanel x:Name="SetGpuRow" Orientation="Horizontal"/>
-        <TextBlock x:Name="SetGpuHint" Text="" Foreground="#4E4E54" FontSize="10" Margin="2,6,0,0"
-                   TextWrapping="Wrap"/>
-      </StackPanel>
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="22,2,12,14">
+          <Grid>
+            <StackPanel x:Name="SetPaneGpu">
+              <TextBlock Text="监控哪块显卡" Foreground="#F5F5F7" FontSize="13" FontWeight="SemiBold"
+                         Margin="0,4,0,10"/>
+              <WrapPanel x:Name="SetGpuRow"/>
+              <TextBlock x:Name="SetGpuHint" Text="" Foreground="#6E6E73" FontSize="10.5"
+                         Margin="2,8,0,0" TextWrapping="Wrap"/>
+              <TextBlock Text="温度和占用每 2 秒刷新一次，切换后立即生效。"
+                         Foreground="#4E4E54" FontSize="10" Margin="2,10,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
 
-      <TextBlock Grid.Row="3" Text="已导入的日历" Foreground="#8A8A90" FontSize="11"
-                 Margin="20,0,0,8"/>
+            <StackPanel x:Name="SetPaneLoc" Visibility="Collapsed">
+              <TextBlock Text="天气位置" Foreground="#F5F5F7" FontSize="13" FontWeight="SemiBold"
+                         Margin="0,4,0,6"/>
+              <TextBlock Text="填这个地方的经纬度（不是窗口位置）。改完点「应用」。"
+                         Foreground="#6E6E73" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,12"/>
+              <StackPanel Orientation="Horizontal">
+                <Border CornerRadius="9" Background="#1FFFFFFF" Width="112">
+                  <Grid>
+                    <TextBox x:Name="SetLatInput" Background="Transparent" BorderThickness="0"
+                             Foreground="#F5F5F7" CaretBrush="#F5F5F7" Padding="10,8" FontSize="11.5"/>
+                    <TextBlock x:Name="SetLatPh" Text="纬度" IsHitTestVisible="False" Foreground="#4E4E54" FontSize="11"
+                               Margin="12,0,0,0" VerticalAlignment="Center"/>
+                  </Grid>
+                </Border>
+                <Border CornerRadius="9" Background="#1FFFFFFF" Width="112" Margin="8,0,0,0">
+                  <Grid>
+                    <TextBox x:Name="SetLonInput" Background="Transparent" BorderThickness="0"
+                             Foreground="#F5F5F7" CaretBrush="#F5F5F7" Padding="10,8" FontSize="11.5"/>
+                    <TextBlock x:Name="SetLonPh" Text="经度" IsHitTestVisible="False" Foreground="#4E4E54" FontSize="11"
+                               Margin="12,0,0,0" VerticalAlignment="Center"/>
+                  </Grid>
+                </Border>
+                <Button x:Name="SetLocBtn" Content="应用" Width="54" Height="32" Margin="8,0,0,0"
+                        Background="Transparent" Foreground="#0A84FF" BorderThickness="0"
+                        FontSize="11.5" Cursor="Hand" Padding="0"/>
+              </StackPanel>
+              <TextBlock x:Name="SetLocHint" Text="" Foreground="#6E6E73" FontSize="10"
+                         Margin="2,8,0,0" TextWrapping="Wrap"/>
+              <TextBlock Text="两个都留空就等于用谢菲尔德；想换成别处，搜「地名 + 经纬度」填进来再点「应用」。"
+                         Foreground="#4E4E54" FontSize="10" Margin="2,12,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
 
-      <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto" Margin="20,0,16,16">
-        <StackPanel x:Name="SetSourceList"/>
-      </ScrollViewer>
+            <StackPanel x:Name="SetPaneCal" Visibility="Collapsed">
+              <TextBlock Text="日历订阅" Foreground="#F5F5F7" FontSize="13" FontWeight="SemiBold"
+                         Margin="0,4,0,6"/>
+              <TextBlock Text="粘贴 .ics 链接（Google / Outlook / 学校教务都行）。"
+                         Foreground="#6E6E73" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,10"/>
+              <Border CornerRadius="9" Background="#1FFFFFFF">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBox x:Name="SetUrlInput" Grid.Column="0" Background="Transparent" BorderThickness="0"
+                           Foreground="#F5F5F7" CaretBrush="#F5F5F7" Padding="11,9" FontSize="11.5"/>
+                  <TextBlock x:Name="SetUrlHint" Grid.Column="0" Text="https://…" IsHitTestVisible="False"
+                             Foreground="#4E4E54" FontSize="11.5" Margin="13,0,0,0" VerticalAlignment="Center"/>
+                  <Button x:Name="SetImportBtn" Grid.Column="1" Content="导入" Width="54" Height="30"
+                          Margin="0,0,4,0" Background="Transparent" Foreground="#0A84FF"
+                          BorderThickness="0" FontSize="11.5" Cursor="Hand" Padding="0"
+                          VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <TextBlock x:Name="SetStatus" Text="" Foreground="#8A8A90" FontSize="10.5"
+                         Margin="2,8,0,0" TextWrapping="Wrap"/>
+              <TextBlock Text="已导入的日历" Foreground="#8A8A90" FontSize="10.5" Margin="0,16,0,8"/>
+              <StackPanel x:Name="SetSourceList"/>
+            </StackPanel>
+
+            <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
+              <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
+                         Margin="0,4,0,4"/>
+              <TextBlock Text="v1.0.0 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+                         FontSize="10.5" TextWrapping="Wrap"/>
+              <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
+                <StackPanel>
+                  <TextBlock Text="项目主页" Foreground="#8A8A90" FontSize="10"/>
+                  <TextBlock x:Name="SetRepoLink" Text="github.com/T0086/beacon" Foreground="#0A84FF"
+                             FontSize="11.5" Cursor="Hand" Margin="0,4,0,0"/>
+                </StackPanel>
+              </Border>
+              <TextBlock Text="数据全部存在本地（state / notes / imported 三个 json），不上传到任何服务器。"
+                         Foreground="#4E4E54" FontSize="10" TextWrapping="Wrap" Margin="2,14,0,0"/>
+            </StackPanel>
+          </Grid>
+        </ScrollViewer>
+      </Grid>
     </Grid>
   </Border>
 </Window>
@@ -702,6 +784,25 @@ $SetStatus     = $sw.FindName('SetStatus')
 $SetSourceList = $sw.FindName('SetSourceList')
 $SetGpuRow     = $sw.FindName('SetGpuRow')
 $SetGpuHint    = $sw.FindName('SetGpuHint')
+$SetLatInput    = $sw.FindName('SetLatInput')
+$SetLonInput    = $sw.FindName('SetLonInput')
+$SetLatPh       = $sw.FindName('SetLatPh')
+$SetLonPh       = $sw.FindName('SetLonPh')
+$SetLocBtn      = $sw.FindName('SetLocBtn')
+$SetLocHint     = $sw.FindName('SetLocHint')
+$SetPaneGpu     = $sw.FindName('SetPaneGpu')
+$SetPaneLoc     = $sw.FindName('SetPaneLoc')
+$SetPaneCal     = $sw.FindName('SetPaneCal')
+$SetPaneAbout   = $sw.FindName('SetPaneAbout')
+$NavGpu         = $sw.FindName('NavGpu')
+$NavLoc         = $sw.FindName('NavLoc')
+$NavCal         = $sw.FindName('NavCal')
+$NavAbout       = $sw.FindName('NavAbout')
+$NavGpuText     = $sw.FindName('NavGpuText')
+$NavLocText     = $sw.FindName('NavLocText')
+$NavCalText     = $sw.FindName('NavCalText')
+$NavAboutText   = $sw.FindName('NavAboutText')
+$SetRepoLink    = $sw.FindName('SetRepoLink')
 $HeadDate  = $w.FindName('HeadDate')
 $HeadSub   = $w.FindName('HeadSub')
 $CloseBtn  = $w.FindName('CloseBtn')
@@ -724,7 +825,9 @@ $CalNext   = $w.FindName('CalNext')
 # ---------------------------------------------------------------- placement
 $wa = [System.Windows.SystemParameters]::WorkArea
 $state = Load-State
-$script:GpuPick = [string]$state.GpuPick
+$script:GpuPick    = [string]$state.GpuPick
+$script:WeatherLat = $state.WeatherLat
+$script:WeatherLon = $state.WeatherLon
 if ($null -ne $state.Left -and $null -ne $state.Top) {
     $w.Left = $state.Left
     $w.Top  = $state.Top
@@ -902,7 +1005,10 @@ function Update-Weather {
     if (((Get-Date) - $script:WeatherAt).TotalMinutes -lt 20) { return }
     $script:WeatherAt = Get-Date
     try {
-        $r = Invoke-RestMethod -Uri 'https://api.open-meteo.com/v1/forecast?latitude=53.3811&longitude=-1.4701&current=temperature_2m,weather_code' -TimeoutSec 8
+        $lat = if ($null -ne $script:WeatherLat) { [double]$script:WeatherLat } else { 53.3811 }
+        $lon = if ($null -ne $script:WeatherLon) { [double]$script:WeatherLon } else { -1.4701 }
+        $url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code"
+        $r = Invoke-RestMethod -Uri $url -TimeoutSec 8
         $t = [math]::Round([double]$r.current.temperature_2m)
         $desc = Get-WeatherDesc ([int]$r.current.weather_code)
         $script:WeatherCache = "$t°C $desc"
@@ -1277,23 +1383,96 @@ $SetCloseBtn.Add_Click({ $sw.Hide() })
 
 $SetHeader.Add_MouseLeftButtonDown({ $sw.DragMove() })
 
+# ---- left nav: one pane at a time, nothing stacked on one screen
+$script:SetTab = 'gpu'
+function Select-Pane([string]$key) {
+    $script:SetTab = $key
+    $rows = @(
+        @{ k = 'gpu';   nav = $NavGpu;   txt = $NavGpuText;   pane = $SetPaneGpu },
+        @{ k = 'loc';   nav = $NavLoc;   txt = $NavLocText;   pane = $SetPaneLoc },
+        @{ k = 'cal';   nav = $NavCal;   txt = $NavCalText;   pane = $SetPaneCal },
+        @{ k = 'about'; nav = $NavAbout; txt = $NavAboutText; pane = $SetPaneAbout }
+    )
+    foreach ($r in $rows) {
+        if ($r.k -eq $key) {
+            $r.nav.Background = Brush '#1FFFFFFF'
+            $r.txt.Foreground = Brush '#F5F5F7'
+            $r.txt.FontWeight = 'SemiBold'
+            $r.pane.Visibility = 'Visible'
+        } else {
+            $r.nav.Background = Brush 'Transparent'
+            $r.txt.Foreground = Brush '#8A8A90'
+            $r.txt.FontWeight = 'Normal'
+            $r.pane.Visibility = 'Collapsed'
+        }
+    }
+}
+
+$NavGpu.Add_MouseLeftButtonUp({ Select-Pane 'gpu' })
+$NavLoc.Add_MouseLeftButtonUp({ Select-Pane 'loc' })
+$NavCal.Add_MouseLeftButtonUp({ Select-Pane 'cal' })
+$NavAbout.Add_MouseLeftButtonUp({ Select-Pane 'about' })
+
+$SetRepoLink.Add_MouseLeftButtonUp({
+    try { [System.Diagnostics.Process]::Start('https://github.com/T0086/beacon') } catch {}
+})
+
 $SetUrlInput.Add_TextChanged({
     if ($SetUrlInput.Text) { $SetUrlHint.Visibility = 'Collapsed' } else { $SetUrlHint.Visibility = 'Visible' }
 })
 
 $SetImportBtn.Add_Click({ Import-IcsSource })
 
+# apply the weather location (lat / lon)
+$SetLocBtn.Add_Click({
+    $laTxt = ([string]$SetLatInput.Text).Trim()
+    $loTxt = ([string]$SetLonInput.Text).Trim()
+    if (-not $laTxt -and -not $loTxt) {
+        # both empty = clear the custom location, fall back to the built-in default
+        $script:WeatherLat = $null
+        $script:WeatherLon = $null
+        $script:WeatherAt  = [datetime]::MinValue
+        Save-State
+        Update-Weather
+        $SetLocHint.Text = '已清空，天气按谢菲尔德查'
+        return
+    }
+    try {
+        $la = [double]::Parse($laTxt, [System.Globalization.CultureInfo]::InvariantCulture)
+        $lo = [double]::Parse($loTxt, [System.Globalization.CultureInfo]::InvariantCulture)
+        if ($la -lt -90 -or $la -gt 90) { throw 'lat' }
+        if ($lo -lt -180 -or $lo -gt 180) { throw 'lon' }
+        $script:WeatherLat = $la
+        $script:WeatherLon = $lo
+        $script:WeatherAt  = [datetime]::MinValue
+        Save-State
+        Update-Weather
+        $SetLocHint.Text = "已保存 $la, $lo"
+    } catch {
+        $SetLocHint.Text = '请输入有效数字（纬度 -90~90，经度 -180~180）'
+    }
+})
+
+# watermark: hide the 纬度 / 经度 hint as soon as the box has text in it
+function Sync-LocPlaceholder {
+    $SetLatPh.Visibility = if ("$($SetLatInput.Text)") { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+    $SetLonPh.Visibility = if ("$($SetLonInput.Text)") { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+}
+$SetLatInput.Add_TextChanged({ Sync-LocPlaceholder })
+$SetLonInput.Add_TextChanged({ Sync-LocPlaceholder })
+
 $SettingsBtn.Add_Click({
     if (-not $sw.IsVisible) {
-        $setLeft = $w.Left - 470 - 12
+        $setLeft = $w.Left - 640 - 12
         if ($setLeft -lt $wa.Left + 8) { $setLeft = $wa.Left + 8 }
         $sw.Left = $setLeft
-        $sw.Top  = $w.Top
+        $sw.Top  = [math]::Max($wa.Top + 8, [math]::Min($w.Top, $wa.Top + $wa.Height - 620))
         $sw.Show()
     } else {
         $sw.Activate()
     }
     Render-Settings
+    Select-Pane $script:SetTab
 })
 
 # ---------------------------------------------------------------- lock / layer
@@ -1310,15 +1489,59 @@ public class OrbWin32 {
 }
 "@ -ErrorAction SilentlyContinue
 
-# WS_EX_TRANSPARENT (0x20) makes the whole window ignore the mouse so clicks fall
-# through to whatever is underneath. GWL_EXSTYLE is -20.
+# Click-through: only WS_EX_TRANSPARENT really forwards clicks to *other processes*.
+# WM_NCHITTEST / HTTRANSPARENT only skips between windows of the same thread, which is
+# why clicking through to the browser did nothing. To keep the padlock usable we park a
+# tiny invisible always-on-top window exactly over it; that one eats the unlock click
+# while everything else on the bar lets the mouse reach the app underneath.
+$script:ClickThrough = $false
+
 function Set-ClickThrough([bool]$on) {
+    if ($script:ClickThrough -eq $on) { return }
     try {
         $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
-        $ex = [OrbWin32]::GetWindowLong($hwnd, -20)
-        if ($on) { $ex = $ex -bor 0x20 } else { $ex = $ex -band (-bnot 0x20) }
+        $ex = [int][OrbWin32]::GetWindowLong($hwnd, -20)
+        if ($on) { $ex = $ex -bor 0x00000020 } else { $ex = $ex -band (-bnot 0x00000020) }
         [void][OrbWin32]::SetWindowLong($hwnd, -20, $ex)
+        $script:ClickThrough = $on
     } catch {}
+}
+
+$script:UnlockWin = $null
+
+function Show-UnlockPatch {
+    try {
+        if (-not $script:UnlockWin) {
+            $uw = New-Object System.Windows.Window
+            $uw.WindowStyle       = 'None'
+            $uw.AllowsTransparency = $true
+            $uw.Background        = Brush '#01161920'   # alpha 1/255: invisible yet hit-testable
+            $uw.ShowInTaskbar     = $false
+            $uw.Topmost           = $true
+            $uw.ResizeMode        = 'NoResize'
+            $uw.ShowActivated     = $false
+            $uw.Cursor            = 'Hand'
+            $uw.Add_MouseLeftButtonUp({
+                param($s, $ev)
+                $ev.Handled = $true
+                $script:Locked = $false
+                Update-LockUI
+            })
+            $script:UnlockWin = $uw
+        }
+        if ($LockBtn.ActualWidth -gt 0) {
+            $p = $LockBtn.TranslatePoint((New-Object System.Windows.Point(0, 0)), $w)
+            $script:UnlockWin.Width  = [double]$LockBtn.ActualWidth + 10
+            $script:UnlockWin.Height = [double]$LockBtn.ActualHeight + 10
+            $script:UnlockWin.Left   = $w.Left + $p.X - 5
+            $script:UnlockWin.Top    = $w.Top  + $p.Y - 5
+        }
+        if (-not $script:UnlockWin.IsVisible) { $script:UnlockWin.Show() }
+    } catch {}
+}
+
+function Hide-UnlockPatch {
+    try { if ($script:UnlockWin) { $script:UnlockWin.Hide() } } catch {}
 }
 
 function Update-LockUI {
@@ -1327,12 +1550,15 @@ function Update-LockUI {
         $LockIcon.Foreground = Brush '#FF9F0A'
         # locked: fade the bar down so underlying content stays readable
         try { $OrbView.Background = Brush '#8C161920' } catch {}
+        Show-UnlockPatch
+        Set-ClickThrough $true
     } else {
         $LockIcon.Text = [string][char]0xE785
         $LockIcon.Foreground = Brush '#7A7A80'
         try { $OrbView.Background = Brush '#F0181B21' } catch {}
+        Set-ClickThrough $false
+        Hide-UnlockPatch
     }
-    Set-ClickThrough $script:Locked
 }
 
 function Update-LayerUI {
@@ -1778,6 +2004,18 @@ function Render-Settings {
         $SetGpuHint.Text = '自动 = 优先独显，没有独显就用核显'
     }
 
+    # ---- weather location fields
+    if ($null -ne $script:WeatherLat -and $null -ne $script:WeatherLon) {
+        $SetLatInput.Text = [string]$script:WeatherLat
+        $SetLonInput.Text = [string]$script:WeatherLon
+        $SetLocHint.Text = '当前坐标'
+    } else {
+        $SetLatInput.Text = ''
+        $SetLonInput.Text = ''
+        $SetLocHint.Text = '还没设置，天气按谢菲尔德（53.3811, -1.4701）查'
+    }
+    Sync-LocPlaceholder
+
     $SetSourceList.Children.Clear()
     if (@($script:Sources).Count -eq 0) {
         $t = New-Object System.Windows.Controls.TextBlock
@@ -2129,6 +2367,26 @@ $metricTimer.Interval = [TimeSpan]::FromSeconds(2)
 $metricTimer.Add_Tick({ Update-Orb })
 $metricTimer.Start()
 
+# graceful shutdown channel: writing quit.flag lets a restart dispose the tray icon
+# properly instead of leaving a ghost behind (Stop-Process can't clean up NotifyIcon)
+$quitWatcher = New-Object System.Windows.Threading.DispatcherTimer
+$quitWatcher.Interval = [TimeSpan]::FromSeconds(2)
+$quitWatcher.Add_Tick({
+    $qf = Join-Path $Base 'quit.flag'
+    if (Test-Path $qf) {
+        Remove-Item $qf -Force -ErrorAction SilentlyContinue
+        try { Save-State } catch {}
+        try { $ni.Visible = $false; $ni.Dispose() } catch {}
+        try { $script:OrbMutex.ReleaseMutex() } catch {}
+        try { $w.Close() } catch {}
+        # closing the window alone does not always end the process, and a lingering
+        # process is what leaves the ghost tray icon behind
+        try { [System.Windows.Application]::Current.Shutdown() } catch {}
+        [Environment]::Exit(0)
+    }
+})
+$quitWatcher.Start()
+
 # schedule refresh every 5min
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMinutes(5)
@@ -2172,5 +2430,15 @@ $refreshTimer.Add_Tick({
     }
 })
 $refreshTimer.Start()
+
+# A crash used to leave nothing behind. Log it (do not swallow: behaviour stays the same).
+$app.Add_DispatcherUnhandledException({
+    param($s, $e)
+    try {
+        $line = "[{0}] {1}`r`n{2}`r`n`r`n" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'),
+                $e.Exception.GetType().FullName, $e.Exception.ToString()
+        Add-Content -Path (Join-Path $Base 'error.log') -Value $line -Encoding UTF8
+    } catch {}
+})
 
 $app.Run($w) | Out-Null
