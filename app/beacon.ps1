@@ -813,6 +813,29 @@ function Get-LhmCpuTemp {
     return $null
 }
 
+function Get-LhmGpuLoad {
+    if (-not $script:LhmComputer) { return $null }
+    try {
+        # Machines can have several adapters (e.g. AMD iGPU + NVIDIA dGPU, or a
+        # laptop with only integrated graphics). Take the busiest "GPU Core" load
+        # so we always show the adapter that is actually working.
+        $max = $null
+        foreach ($h in $script:LhmComputer.Hardware) {
+            if ("$($h.HardwareType)" -notmatch 'Gpu') { continue }
+            $h.Update()
+            foreach ($s in $h.Sensors) {
+                if ("$($s.SensorType)" -ne 'Load') { continue }
+                if ("$($s.Name)" -ne 'GPU Core') { continue }
+                if ($null -eq $s.Value) { continue }
+                $v = [double]$s.Value
+                if ($null -eq $max -or $v -gt $max) { $max = $v }
+            }
+        }
+        return $max
+    } catch {}
+    return $null
+}
+
 # ---------------------------------------------------------------- weather
 $script:WeatherCache = '--'
 $script:WeatherAt    = [datetime]::MinValue
@@ -938,11 +961,21 @@ function Update-Orb {
         $TempText.Foreground = Brush '#6E6E73'
     }
 
-    if ($script:NvSmi) {
+    # GPU: LibreHardwareMonitor handles both discrete and integrated GPUs (works on
+    # laptops with only iGPU). nvidia-smi is the fallback when LHM has nothing.
+    $gpuPct = Get-LhmGpuLoad
+    if ($null -eq $gpuPct -and $script:NvSmi) {
         try {
             $o = & nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>$null
-            if ($o) { $GpuText.Text = 'GPU ' + ([string]$o).Trim() + '%' }
-        } catch { $GpuText.Text = 'GPU --' }
+            if ($o) { $gpuPct = [double]([string]$o).Trim() }
+        } catch {}
+    }
+    if ($null -ne $gpuPct) {
+        $GpuText.Text = 'GPU ' + ([math]::Round($gpuPct, 0)).ToString() + '%'
+        $GpuText.Foreground = Brush $(if ($gpuPct -ge 90) { '#FF453A' } elseif ($gpuPct -ge 60) { '#FF9F0A' } else { '#D8D8DC' })
+    } else {
+        $GpuText.Text = 'GPU --'
+        $GpuText.Foreground = Brush '#6E6E73'
     }
 
     if ($script:pcMem) {
@@ -950,7 +983,7 @@ function Update-Orb {
             $availGB = $script:pcMem.NextValue() / 1024
             $usedGB  = $script:RamTotalGB - $availGB
             $RamText.Text = 'RAM ' + ([math]::Round($usedGB, 1)).ToString() + '/' +
-                            $script:RamTotalGB.ToString() + 'G'
+                            $script:RamTotalGB.ToString()
         } catch { }
     }
 
