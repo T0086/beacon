@@ -262,19 +262,24 @@ function Format-DueShort($key) {
 }
 
 function Load-State {
-    $s = @{ Left = $null; Top = $null }
+    $s = @{ Left = $null; Top = $null; GpuPick = 'auto' }
     if (Test-Path $StatePath) {
         try {
             $o = Get-Content $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($null -ne $o.Left) { $s.Left = [double]$o.Left }
             if ($null -ne $o.Top)  { $s.Top  = [double]$o.Top }
+            if ($null -ne $o.GpuPick -and "$($o.GpuPick)") { $s.GpuPick = [string]$o.GpuPick }
         } catch {}
     }
     return $s
 }
 
 function Save-State {
-    $o = [pscustomobject]@{ Left = [double]$w.Left; Top = [double]$w.Top }
+    $o = [pscustomobject]@{
+        Left    = [double]$w.Left
+        Top     = [double]$w.Top
+        GpuPick = [string]$script:GpuPick
+    }
     [System.IO.File]::WriteAllText($StatePath, ($o | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
 }
 
@@ -557,7 +562,7 @@ $settingsXaml = @'
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="日程球 设置" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
-        Width="420" Height="430"
+        Width="420" Height="500"
         FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif">
   <Window.Resources>
     <Style TargetType="{x:Type ScrollBar}">
@@ -588,6 +593,7 @@ $settingsXaml = @'
   <Border CornerRadius="16" Background="#FC15181E" BorderBrush="#2EFFFFFF" BorderThickness="1">
     <Grid>
       <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
         <RowDefinition Height="Auto"/>
         <RowDefinition Height="Auto"/>
         <RowDefinition Height="Auto"/>
@@ -624,10 +630,17 @@ $settingsXaml = @'
                    Margin="2,8,0,0" TextWrapping="Wrap"/>
       </StackPanel>
 
-      <TextBlock Grid.Row="2" Text="已导入的日历" Foreground="#8A8A90" FontSize="11"
+      <StackPanel Grid.Row="2" Margin="20,0,20,14">
+        <TextBlock Text="显卡监控" Foreground="#8A8A90" FontSize="11" Margin="0,0,0,8"/>
+        <StackPanel x:Name="SetGpuRow" Orientation="Horizontal"/>
+        <TextBlock x:Name="SetGpuHint" Text="" Foreground="#4E4E54" FontSize="10" Margin="2,6,0,0"
+                   TextWrapping="Wrap"/>
+      </StackPanel>
+
+      <TextBlock Grid.Row="3" Text="已导入的日历" Foreground="#8A8A90" FontSize="11"
                  Margin="20,0,0,8"/>
 
-      <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" Margin="20,0,16,16">
+      <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto" Margin="20,0,16,16">
         <StackPanel x:Name="SetSourceList"/>
       </ScrollViewer>
     </Grid>
@@ -687,6 +700,8 @@ $SetUrlHint    = $sw.FindName('SetUrlHint')
 $SetImportBtn  = $sw.FindName('SetImportBtn')
 $SetStatus     = $sw.FindName('SetStatus')
 $SetSourceList = $sw.FindName('SetSourceList')
+$SetGpuRow     = $sw.FindName('SetGpuRow')
+$SetGpuHint    = $sw.FindName('SetGpuHint')
 $HeadDate  = $w.FindName('HeadDate')
 $HeadSub   = $w.FindName('HeadSub')
 $CloseBtn  = $w.FindName('CloseBtn')
@@ -709,6 +724,7 @@ $CalNext   = $w.FindName('CalNext')
 # ---------------------------------------------------------------- placement
 $wa = [System.Windows.SystemParameters]::WorkArea
 $state = Load-State
+$script:GpuPick = [string]$state.GpuPick
 if ($null -ne $state.Left -and $null -ne $state.Top) {
     $w.Left = $state.Left
     $w.Top  = $state.Top
@@ -814,13 +830,28 @@ function Get-LhmCpuTemp {
     return $null
 }
 
+function Get-LhmGpuList {
+    $out = @()
+    if (-not $script:LhmComputer) { return $out }
+    try {
+        foreach ($h in $script:LhmComputer.Hardware) {
+            if ("$($h.HardwareType)" -notmatch 'Gpu') { continue }
+            $out += "$($h.Name)"
+        }
+    } catch {}
+    return $out
+}
+
 function Get-LhmGpuLoad {
     if (-not $script:LhmComputer) { return $null }
     try {
+        $pick = if ($script:GpuPick) { [string]$script:GpuPick } else { 'auto' }
         $entries = @()
         foreach ($h in $script:LhmComputer.Hardware) {
             $type = "$($h.HardwareType)"
             if ($type -notmatch 'Gpu') { continue }
+            # honour the user's explicit adapter choice from Settings
+            if ($pick -ne 'auto' -and "$($h.Name)" -ne $pick) { continue }
             $h.Update()
             $load = $null
             foreach ($s in $h.Sensors) {
@@ -1274,17 +1305,34 @@ using System;
 using System.Runtime.InteropServices;
 public class OrbWin32 {
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+  [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 }
 "@ -ErrorAction SilentlyContinue
+
+# WS_EX_TRANSPARENT (0x20) makes the whole window ignore the mouse so clicks fall
+# through to whatever is underneath. GWL_EXSTYLE is -20.
+function Set-ClickThrough([bool]$on) {
+    try {
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
+        $ex = [OrbWin32]::GetWindowLong($hwnd, -20)
+        if ($on) { $ex = $ex -bor 0x20 } else { $ex = $ex -band (-bnot 0x20) }
+        [void][OrbWin32]::SetWindowLong($hwnd, -20, $ex)
+    } catch {}
+}
 
 function Update-LockUI {
     if ($script:Locked) {
         $LockIcon.Text = [string][char]0xE72E
         $LockIcon.Foreground = Brush '#FF9F0A'
+        # locked: fade the bar down so underlying content stays readable
+        try { $OrbView.Background = Brush '#8C161920' } catch {}
     } else {
         $LockIcon.Text = [string][char]0xE785
         $LockIcon.Foreground = Brush '#7A7A80'
+        try { $OrbView.Background = Brush '#F0181B21' } catch {}
     }
+    Set-ClickThrough $script:Locked
 }
 
 function Update-LayerUI {
@@ -1684,6 +1732,52 @@ function Render-Notes {
 
 # ---------------------------------------------------------------- settings / import
 function Render-Settings {
+    # ---- GPU selector
+    $SetGpuRow.Children.Clear()
+    $mkGpuBtn = {
+        param($label, $value)
+        $b = New-Object System.Windows.Controls.Border
+        $b.CornerRadius = '7'
+        $b.Padding = '10,5,10,5'
+        $b.Margin = '0,0,6,0'
+        $b.Cursor = 'Hand'
+        $b.Tag = $value
+        $b.BorderThickness = '1'
+        if ("$($script:GpuPick)" -eq "$value") {
+            $b.Background = Brush '#33FF9F0A'
+            $b.BorderBrush = Brush '#FF9F0A'
+        } else {
+            $b.Background = Brush '#14FFFFFF'
+            $b.BorderBrush = Brush 'Transparent'
+        }
+        $tb = New-Object System.Windows.Controls.TextBlock
+        $tb.Text = $label
+        $tb.FontSize = 10.5
+        $tb.TextTrimming = 'CharacterEllipsis'
+        $tb.MaxWidth = 150
+        $tb.Foreground = Brush $(if ("$($script:GpuPick)" -eq "$value") { '#FFBF4A' } else { '#B0B0B6' })
+        $b.Child = $tb
+        $b.Add_MouseLeftButtonUp({
+            param($sender, $ev)
+            $script:GpuPick = [string]$sender.Tag
+            Save-State
+            Render-Settings
+        })
+        $SetGpuRow.Children.Add($b) | Out-Null
+    }
+
+    & $mkGpuBtn '自动' 'auto'
+    $gpuNames = Get-LhmGpuList
+    foreach ($gn in $gpuNames) { & $mkGpuBtn $gn $gn }
+
+    if (-not $script:LhmComputer) {
+        $SetGpuHint.Text = '硬件监控库未加载，无法读取显卡'
+    } elseif (@($gpuNames).Count -le 1) {
+        $SetGpuHint.Text = '只检测到一块显卡'
+    } else {
+        $SetGpuHint.Text = '自动 = 优先独显，没有独显就用核显'
+    }
+
     $SetSourceList.Children.Clear()
     if (@($script:Sources).Count -eq 0) {
         $t = New-Object System.Windows.Controls.TextBlock
@@ -1975,6 +2069,14 @@ $miShow.Add_Click({
     if (-not $w.IsVisible) { $w.Show() }
     Expand-Orb
 })
+# when locked the window is click-through, so the tray is the only way back
+$miUnlock = New-Object System.Windows.Forms.ToolStripMenuItem '解除锁定'
+$miUnlock.Add_Click({
+    if ($script:Locked) {
+        $script:Locked = $false
+        Update-LockUI
+    }
+})
 $miQuit = New-Object System.Windows.Forms.ToolStripMenuItem '退出'
 $miQuit.Add_Click({
     Save-State
@@ -1982,6 +2084,7 @@ $miQuit.Add_Click({
     $w.Close()
 })
 $menu.Items.Add($miShow) | Out-Null
+$menu.Items.Add($miUnlock) | Out-Null
 $menu.Items.Add($miQuit) | Out-Null
 $ni.ContextMenuStrip = $menu
 
