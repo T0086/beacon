@@ -9,6 +9,14 @@ PowerShell + WPF 写的，一个脚本跑起来，不编译、不装运行时。
 
 ![beacon](assets/beacon-512.png)
 
+## 下载
+
+| 版本 | 说明 |
+|---|---|
+| **[beacon-1.0.0.zip](https://github.com/T0086/beacon/releases/download/v1.0.0/beacon-1.0.0.zip)** | 1.5 MB，解压后双击 `安装.bat` |
+
+或者从源码目录直接用（把 `app/` 拿去，自己建计划任务）。
+
 ## 长什么样
 
 **收起态**（470×76 圆角长条）：
