@@ -763,7 +763,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.5 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.6 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
