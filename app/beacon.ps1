@@ -710,7 +710,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.1 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.2 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -1508,6 +1508,20 @@ function Set-ClickThrough([bool]$on) {
 }
 
 $script:UnlockWin = $null
+
+# WS_EX_NOACTIVATE (0x08000000): the bar never takes activation, so clicking it
+# while a game is in the foreground no longer pulls focus out of the game.
+function Set-NoActivate {
+    try {
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
+        $ex = [int][OrbWin32]::GetWindowLong($hwnd, -20)
+        if (($ex -band 0x08000000) -eq 0) {
+            [void][OrbWin32]::SetWindowLong($hwnd, -20, ($ex -bor 0x08000000))
+        }
+    } catch {}
+}
+
+$w.Add_SourceInitialized({ Set-NoActivate })
 
 function Show-UnlockPatch {
     try {
