@@ -262,7 +262,8 @@ function Format-DueShort($key) {
 }
 
 function Load-State {
-    $s = @{ Left = $null; Top = $null; GpuPick = 'auto'; WeatherLat = $null; WeatherLon = $null }
+    $s = @{ Left = $null; Top = $null; GpuPick = 'auto'; WeatherLat = $null; WeatherLon = $null
+            PosPin = $false; PosLeft = $null; PosTop = $null }
     if (Test-Path $StatePath) {
         try {
             $o = Get-Content $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -271,6 +272,9 @@ function Load-State {
             if ($null -ne $o.GpuPick -and "$($o.GpuPick)") { $s.GpuPick = [string]$o.GpuPick }
             if ($null -ne $o.WeatherLat -and "$($o.WeatherLat)") { $s.WeatherLat = [double]$o.WeatherLat }
             if ($null -ne $o.WeatherLon -and "$($o.WeatherLon)") { $s.WeatherLon = [double]$o.WeatherLon }
+            if ("$($o.PosPin)" -eq 'True') { $s.PosPin = $true }
+            if ($null -ne $o.PosLeft -and "$($o.PosLeft)") { $s.PosLeft = [double]$o.PosLeft }
+            if ($null -ne $o.PosTop -and "$($o.PosTop)") { $s.PosTop = [double]$o.PosTop }
         } catch {}
     }
     return $s
@@ -283,6 +287,9 @@ function Save-State {
         GpuPick    = [string]$script:GpuPick
         WeatherLat = $script:WeatherLat
         WeatherLon = $script:WeatherLon
+        PosPin     = [bool]$script:PosPin
+        PosLeft    = $script:PosLeft
+        PosTop     = $script:PosTop
     }
     [System.IO.File]::WriteAllText($StatePath, ($o | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -621,6 +628,10 @@ $settingsXaml = @'
                     Background="Transparent" Cursor="Hand">
               <TextBlock x:Name="NavGpuText" Text="显卡监控" FontSize="12" Foreground="#8A8A90"/>
             </Border>
+            <Border x:Name="NavPos" Tag="pos" CornerRadius="8" Padding="11,8" Margin="0,2,0,0"
+                    Background="Transparent" Cursor="Hand">
+              <TextBlock x:Name="NavPosText" Text="出现位置" FontSize="12" Foreground="#8A8A90"/>
+            </Border>
             <Border x:Name="NavLoc" Tag="loc" CornerRadius="8" Padding="11,8" Margin="0,2,0,0"
                     Background="Transparent" Cursor="Hand">
               <TextBlock x:Name="NavLocText" Text="天气位置" FontSize="12" Foreground="#8A8A90"/>
@@ -646,6 +657,46 @@ $settingsXaml = @'
                          Margin="2,8,0,0" TextWrapping="Wrap"/>
               <TextBlock Text="温度和占用每 2 秒刷新一次，切换后立即生效。"
                          Foreground="#4E4E54" FontSize="10" Margin="2,10,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <StackPanel x:Name="SetPanePos" Visibility="Collapsed">
+              <TextBlock Text="面板出现位置" Foreground="#F5F5F7" FontSize="13" FontWeight="SemiBold"
+                         Margin="0,4,0,6"/>
+              <TextBlock Text="决定主条每次启动时出现在哪。坐标以主屏左上角为原点，左侧副屏是负数。"
+                         Foreground="#6E6E73" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,12"/>
+              <WrapPanel x:Name="SetPosRow">
+                <Button x:Name="SetPosPinBtn" Content="固定到当前位置" Background="#1FFFFFFF"
+                        Foreground="#F5F5F7" BorderThickness="0" FontSize="11.5"
+                        Padding="12,7" Margin="0,0,8,8" Cursor="Hand"/>
+                <Button x:Name="SetPosFollowBtn" Content="跟随上次位置" Background="Transparent"
+                        Foreground="#8A8A90" BorderThickness="0" FontSize="11.5"
+                        Padding="12,7" Margin="0,0,8,8" Cursor="Hand"/>
+              </WrapPanel>
+              <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <Border CornerRadius="9" Background="#1FFFFFFF" Width="104">
+                  <Grid>
+                    <TextBox x:Name="SetPosXInput" Background="Transparent" BorderThickness="0"
+                             Foreground="#F5F5F7" CaretBrush="#F5F5F7" Padding="10,8" FontSize="11.5"/>
+                    <TextBlock x:Name="SetPosXPh" Text="X" IsHitTestVisible="False" Foreground="#4E4E54"
+                               FontSize="11" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                  </Grid>
+                </Border>
+                <Border CornerRadius="9" Background="#1FFFFFFF" Width="104" Margin="8,0,0,0">
+                  <Grid>
+                    <TextBox x:Name="SetPosYInput" Background="Transparent" BorderThickness="0"
+                             Foreground="#F5F5F7" CaretBrush="#F5F5F7" Padding="10,8" FontSize="11.5"/>
+                    <TextBlock x:Name="SetPosYPh" Text="Y" IsHitTestVisible="False" Foreground="#4E4E54"
+                               FontSize="11" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                  </Grid>
+                </Border>
+                <Button x:Name="SetPosApplyBtn" Content="应用" Width="54" Height="32" Margin="8,0,0,0"
+                        Background="Transparent" Foreground="#0A84FF" BorderThickness="0"
+                        FontSize="11.5" Cursor="Hand" Padding="0"/>
+              </StackPanel>
+              <TextBlock x:Name="SetPosHint" Text="" Foreground="#6E6E73" FontSize="10"
+                         Margin="2,8,0,0" TextWrapping="Wrap"/>
+              <TextBlock Text="「固定」= 每次启动都回到这个点，拖动也不会记住；「跟随」= 记住你最后放的地方。"
+                         Foreground="#4E4E54" FontSize="10" Margin="2,12,0,0" TextWrapping="Wrap"/>
             </StackPanel>
 
             <StackPanel x:Name="SetPaneLoc" Visibility="Collapsed">
@@ -710,7 +761,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.2 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.3 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -791,6 +842,17 @@ $SetLonPh       = $sw.FindName('SetLonPh')
 $SetLocBtn      = $sw.FindName('SetLocBtn')
 $SetLocHint     = $sw.FindName('SetLocHint')
 $SetPaneGpu     = $sw.FindName('SetPaneGpu')
+$SetPanePos     = $sw.FindName('SetPanePos')
+$SetPosPinBtn    = $sw.FindName('SetPosPinBtn')
+$SetPosFollowBtn = $sw.FindName('SetPosFollowBtn')
+$SetPosXInput    = $sw.FindName('SetPosXInput')
+$SetPosYInput    = $sw.FindName('SetPosYInput')
+$SetPosXPh       = $sw.FindName('SetPosXPh')
+$SetPosYPh       = $sw.FindName('SetPosYPh')
+$SetPosApplyBtn  = $sw.FindName('SetPosApplyBtn')
+$SetPosHint      = $sw.FindName('SetPosHint')
+$NavPos         = $sw.FindName('NavPos')
+$NavPosText     = $sw.FindName('NavPosText')
 $SetPaneLoc     = $sw.FindName('SetPaneLoc')
 $SetPaneCal     = $sw.FindName('SetPaneCal')
 $SetPaneAbout   = $sw.FindName('SetPaneAbout')
@@ -828,7 +890,14 @@ $state = Load-State
 $script:GpuPick    = [string]$state.GpuPick
 $script:WeatherLat = $state.WeatherLat
 $script:WeatherLon = $state.WeatherLon
-if ($null -ne $state.Left -and $null -ne $state.Top) {
+$script:PosPin     = [bool]$state.PosPin
+$script:PosLeft    = $state.PosLeft
+$script:PosTop     = $state.PosTop
+# 固定位置优先：勾了「固定」就用那组坐标，不再跟随上次拖动
+if ($script:PosPin -and $null -ne $script:PosLeft -and $null -ne $script:PosTop) {
+    $w.Left = $script:PosLeft
+    $w.Top  = $script:PosTop
+} elseif ($null -ne $state.Left -and $null -ne $state.Top) {
     $w.Left = $state.Left
     $w.Top  = $state.Top
 } else {
@@ -1389,6 +1458,7 @@ function Select-Pane([string]$key) {
     $script:SetTab = $key
     $rows = @(
         @{ k = 'gpu';   nav = $NavGpu;   txt = $NavGpuText;   pane = $SetPaneGpu },
+        @{ k = 'pos';   nav = $NavPos;   txt = $NavPosText;   pane = $SetPanePos },
         @{ k = 'loc';   nav = $NavLoc;   txt = $NavLocText;   pane = $SetPaneLoc },
         @{ k = 'cal';   nav = $NavCal;   txt = $NavCalText;   pane = $SetPaneCal },
         @{ k = 'about'; nav = $NavAbout; txt = $NavAboutText; pane = $SetPaneAbout }
@@ -1409,6 +1479,7 @@ function Select-Pane([string]$key) {
 }
 
 $NavGpu.Add_MouseLeftButtonUp({ Select-Pane 'gpu' })
+$NavPos.Add_MouseLeftButtonUp({ Select-Pane 'pos' })
 $NavLoc.Add_MouseLeftButtonUp({ Select-Pane 'loc' })
 $NavCal.Add_MouseLeftButtonUp({ Select-Pane 'cal' })
 $NavAbout.Add_MouseLeftButtonUp({ Select-Pane 'about' })
@@ -1460,6 +1531,46 @@ function Sync-LocPlaceholder {
 }
 $SetLatInput.Add_TextChanged({ Sync-LocPlaceholder })
 $SetLonInput.Add_TextChanged({ Sync-LocPlaceholder })
+
+# ---- 出现位置：固定 or 跟随上次
+function Sync-PosPlaceholder {
+    $SetPosXPh.Visibility = if ("$($SetPosXInput.Text)") { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+    $SetPosYPh.Visibility = if ("$($SetPosYInput.Text)") { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+}
+$SetPosXInput.Add_TextChanged({ Sync-PosPlaceholder })
+$SetPosYInput.Add_TextChanged({ Sync-PosPlaceholder })
+
+function Set-PosPin([bool]$pin, [double]$left, [double]$top) {
+    $script:PosPin = $pin
+    if ($pin) {
+        $script:PosLeft = $left
+        $script:PosTop  = $top
+        $w.Left = $left
+        $w.Top  = $top
+    }
+    Save-State
+    Render-Settings
+    Select-Pane 'pos'
+}
+
+$SetPosPinBtn.Add_Click({
+    Set-PosPin $true $w.Left $w.Top
+    $SetPosHint.Text = '已固定到 ' + [math]::Round($w.Left) + ', ' + [math]::Round($w.Top)
+})
+$SetPosFollowBtn.Add_Click({
+    Set-PosPin $false 0 0
+    $SetPosHint.Text = '已改为跟随上次位置'
+})
+$SetPosApplyBtn.Add_Click({
+    try {
+        $x = [double]::Parse(([string]$SetPosXInput.Text).Trim(), [System.Globalization.CultureInfo]::InvariantCulture)
+        $y = [double]::Parse(([string]$SetPosYInput.Text).Trim(), [System.Globalization.CultureInfo]::InvariantCulture)
+        Set-PosPin $true $x $y
+        $SetPosHint.Text = "已固定到 $x, $y"
+    } catch {
+        $SetPosHint.Text = '请输入数字（左侧副屏是负数，例如 -1912）'
+    }
+})
 
 $SettingsBtn.Add_Click({
     if (-not $sw.IsVisible) {
@@ -2017,6 +2128,18 @@ function Render-Settings {
     } else {
         $SetGpuHint.Text = '自动 = 优先独显，没有独显就用核显'
     }
+
+    # ---- appear position
+    if ($script:PosPin -and $null -ne $script:PosLeft -and $null -ne $script:PosTop) {
+        $SetPosXInput.Text = [string]$script:PosLeft
+        $SetPosYInput.Text = [string]$script:PosTop
+        $SetPosHint.Text = '已固定 · 每次启动都回到这里'
+    } else {
+        $SetPosXInput.Text = ''
+        $SetPosYInput.Text = ''
+        $SetPosHint.Text = '跟随上次位置（现在 ' + [math]::Round($w.Left) + ', ' + [math]::Round($w.Top) + '）'
+    }
+    Sync-PosPlaceholder
 
     # ---- weather location fields
     if ($null -ne $script:WeatherLat -and $null -ne $script:WeatherLon) {
