@@ -768,7 +768,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.8 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.9 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -1609,6 +1609,34 @@ public class OrbWin32 {
 }
 "@ -ErrorAction SilentlyContinue
 
+# WS_EX_TOPMOST on the real window versus $script:OnTop are two different things and they
+# drift: a hidden-then-shown window, a fullscreen app taking the top, a game changing mode.
+# Toggling the cached boolean then costs two clicks - the first one clears a flag that was
+# already effectively off, and only the second one actually raises the window. So never
+# trust the variable: ask the window, then force the z-order with SetWindowPos.
+function Get-OnTopActual {
+    try {
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
+        if ($hwnd -eq [IntPtr]::Zero) { return $script:OnTop }
+        $ex = [int][OrbWin32]::GetWindowLong($hwnd, -20)
+        return (($ex -band 0x00000008) -ne 0)
+    } catch { return $script:OnTop }
+}
+
+function Set-OnTop([bool]$on) {
+    $script:OnTop = $on
+    try { $w.Topmost = $on } catch {}
+    try {
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
+        if ($hwnd -ne [IntPtr]::Zero) {
+            # HWND_TOPMOST = -1, HWND_NOTOPMOST = -2, SWP_NOMOVE|SWP_NOSIZE = 0x0003
+            $after = [IntPtr]$(if ($on) { -1 } else { -2 })
+            [void][OrbWin32]::SetWindowPos($hwnd, $after, 0, 0, 0, 0, 0x0003)
+        }
+    } catch {}
+    try { Update-LayerUI } catch {}
+}
+
 # Click-through: only WS_EX_TRANSPARENT really forwards clicks to *other processes*.
 # WM_NCHITTEST / HTTRANSPARENT only skips between windows of the same thread, which is
 # why clicking through to the browser did nothing. To keep the padlock usable we park a
@@ -1641,7 +1669,7 @@ function Set-NoActivate {
     } catch {}
 }
 
-$w.Add_SourceInitialized({ Set-NoActivate })
+$w.Add_SourceInitialized({ Set-NoActivate; if ($script:OnTop) { Set-OnTop $true } })
 
 function Show-UnlockPatch {
     try {
@@ -1702,15 +1730,20 @@ function Update-LayerUI {
 $LockBtn.Add_MouseLeftButtonDown({
     param($s, $ev)
     $ev.Handled = $true
+    # Handled=true stops the parent from starting a drag, but it also skips ButtonBase's own
+    # capture - and without capture a click that moves 2px loses its ButtonUp. Hold it here.
+    try { [void]$LockBtn.CaptureMouse() } catch {}
 })
 $LayerBtn.Add_MouseLeftButtonDown({
     param($s, $ev)
     $ev.Handled = $true
+    try { [void]$LayerBtn.CaptureMouse() } catch {}
 })
 
 $LockBtn.Add_MouseLeftButtonUp({
     param($s, $ev)
     $ev.Handled = $true
+    try { [void]$LockBtn.ReleaseMouseCapture() } catch {}
     $script:Locked = -not $script:Locked
     Update-LockUI
 })
@@ -1718,17 +1751,8 @@ $LockBtn.Add_MouseLeftButtonUp({
 $LayerBtn.Add_MouseLeftButtonUp({
     param($s, $ev)
     $ev.Handled = $true
-    $script:OnTop = -not $script:OnTop
-    if ($script:OnTop) {
-        $w.Topmost = $true
-    } else {
-        $w.Topmost = $false
-        try {
-            $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
-            [void][OrbWin32]::SetWindowPos($hwnd, [IntPtr]1, 0, 0, 0, 0, 0x0003)
-        } catch {}
-    }
-    Update-LayerUI
+    try { [void]$LayerBtn.ReleaseMouseCapture() } catch {}
+    Set-OnTop (-not (Get-OnTopActual))
 })
 
 Update-LockUI
@@ -2502,6 +2526,8 @@ function Write-Err([string]$where) {
 }
 
 function Expand-Orb {
+    # 置顶 drifts while the bar sits collapsed; force the z-order before anything else
+    if ($script:OnTop) { Set-OnTop $true }
     if ($script:IsOpen) { return }
 
     try {
@@ -2529,6 +2555,9 @@ function Expand-Orb {
 
     $OrbView.Visibility = 'Collapsed'
     $PanelView.Visibility = 'Visible'
+
+    # the month calendar is the default view whenever the panel opens
+    try { Switch-Tab 'month' } catch { Write-Err 'tab' }
 }
 
 function Collapse-Orb {
