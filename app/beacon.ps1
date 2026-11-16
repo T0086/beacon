@@ -756,6 +756,11 @@ $settingsXaml = @'
               </Border>
               <TextBlock x:Name="SetStatus" Text="" Foreground="#8A8A90" FontSize="10.5"
                          Margin="2,8,0,0" TextWrapping="Wrap"/>
+              <Button x:Name="SetExportBtn" Content="导出 .ics" Background="#1FFFFFFF"
+                      Foreground="#F5F5F7" BorderThickness="0" FontSize="11.5"
+                      Padding="12,7" Margin="0,12,0,0" HorizontalAlignment="Left" Cursor="Hand"/>
+              <TextBlock Text="把当前课程和带日期的备忘整合成一份 .ics，可以直接导进 Google / Apple / Outlook 日历。"
+                         Foreground="#6E6E73" FontSize="10" Margin="2,8,0,0" TextWrapping="Wrap"/>
               <TextBlock Text="已导入的日历" Foreground="#8A8A90" FontSize="10.5" Margin="0,16,0,8"/>
               <StackPanel x:Name="SetSourceList"/>
             </StackPanel>
@@ -763,7 +768,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.6 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.7 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -1495,6 +1500,8 @@ $SetUrlInput.Add_TextChanged({
 })
 
 $SetImportBtn.Add_Click({ Import-IcsSource })
+$SetExportBtn  = $sw.FindName('SetExportBtn')
+$SetExportBtn.Add_Click({ Export-Ics })
 
 # apply the weather location (lat / lon)
 $SetLocBtn.Add_Click({
@@ -2225,6 +2232,109 @@ function Render-Settings {
 
         $row.Child = $g
         $SetSourceList.Children.Add($row) | Out-Null
+    }
+}
+
+# ---------------------------------------------------------------- 导出 ics
+# 把现在手里的东西整合成一份标准 .ics：课程事件（带时间的）+ 带截止日的备忘（全天）。
+# 时间写成「不带时区的本地时间」——个人日历按本机时区理解，不必为 Europe/London
+# 的夏令时维护一整段 VTIMEZONE；换到别的时区日历里也仍然是你当时写下的那个钟点。
+function Escape-IcsText([string]$s) {
+    if (-not $s) { return '' }
+    $t = $s -replace '\\', '\\\\'
+    $t = $t -replace ';', '\;'
+    $t = $t -replace ',', '\,'
+    $t = $t -replace "`r`n", '\n'
+    $t = $t -replace "`n", '\n'
+    return $t
+}
+
+function New-IcsUid([string]$seed) {
+    try {
+        $sha = [System.Security.Cryptography.SHA1]::Create()
+        $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($seed))
+        return ([System.BitConverter]::ToString($hash) -replace '-', '').Substring(0, 24).ToLower() + '@beacon'
+    } catch {
+        return ([guid]::NewGuid().ToString('N').Substring(0, 24)) + '@beacon'
+    }
+}
+
+function Build-Ics {
+    $nl = "`r`n"
+    $lines = New-Object System.Collections.ArrayList
+    [void]$lines.Add('BEGIN:VCALENDAR')
+    [void]$lines.Add('VERSION:2.0')
+    [void]$lines.Add('PRODID:-//beacon//beacon//ZH')
+    [void]$lines.Add('CALSCALE:GREGORIAN')
+    [void]$lines.Add('METHOD:PUBLISH')
+    [void]$lines.Add('X-WR-CALNAME:beacon')
+    $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+    $count = 0
+
+    foreach ($e in @($script:Events)) {
+        if (-not $e -or -not $e.start) { continue }
+        $st = [string]$e.start
+        if ($st -notmatch '^\d{4}-\d{2}-\d{2}T') { continue }
+        [void]$lines.Add('BEGIN:VEVENT')
+        [void]$lines.Add('UID:' + (New-IcsUid ($st + '|' + [string]$e.title)))
+        [void]$lines.Add('DTSTAMP:' + $stamp)
+        [void]$lines.Add('DTSTART:' + ($st -replace '[-:]', ''))
+        if ($e.end) {
+            $en = [string]$e.end
+            if ($en -match '^\d{4}-\d{2}-\d{2}T') { [void]$lines.Add('DTEND:' + ($en -replace '[-:]', '')) }
+        }
+        [void]$lines.Add('SUMMARY:' + (Escape-IcsText ([string]$e.title)))
+        if ($e.location) { [void]$lines.Add('LOCATION:' + (Escape-IcsText ([string]$e.location))) }
+        [void]$lines.Add('END:VEVENT')
+        $count++
+    }
+
+    foreach ($n in @($script:Notes)) {
+        if (-not $n -or $n.done -or -not $n.due) { continue }
+        $due = [string]$n.due
+        if ($due -notmatch '^\d{4}-\d{2}-\d{2}$') { continue }
+        $next = ''
+        try { $next = ([datetime]::ParseExact($due, 'yyyy-MM-dd', $null)).AddDays(1).ToString('yyyyMMdd') } catch { continue }
+        [void]$lines.Add('BEGIN:VEVENT')
+        [void]$lines.Add('UID:' + (New-IcsUid ('note|' + [string]$n.id + '|' + $due)))
+        [void]$lines.Add('DTSTAMP:' + $stamp)
+        [void]$lines.Add('DTSTART;VALUE=DATE:' + ($due -replace '-', ''))
+        [void]$lines.Add('DTEND;VALUE=DATE:' + $next)
+        [void]$lines.Add('SUMMARY:' + (Escape-IcsText ([string]$n.text)))
+        [void]$lines.Add('DESCRIPTION:' + (Escape-IcsText '备忘 · 来自 beacon'))
+        [void]$lines.Add('TRANSP:TRANSPARENT')
+        [void]$lines.Add('END:VEVENT')
+        $count++
+    }
+
+    [void]$lines.Add('END:VCALENDAR')
+    return [pscustomobject]@{ text = (($lines -join $nl) + $nl); count = $count }
+}
+
+function Export-Ics {
+    try {
+        $built = Build-Ics
+        if ($built.count -eq 0) {
+            $SetStatus.Text = '现在没有可导出的事件'
+            $SetStatus.Foreground = Brush '#FF9F0A'
+            return
+        }
+        $expDir = Join-Path $Base 'export'
+        if (-not (Test-Path $expDir)) { New-Item -ItemType Directory -Path $expDir -Force | Out-Null }
+
+        $dlg = New-Object Microsoft.Win32.SaveFileDialog
+        $dlg.Filter = 'iCalendar (*.ics)|*.ics'
+        $dlg.DefaultExt = 'ics'
+        $dlg.FileName = 'beacon-' + (Get-Date -Format 'yyyyMMdd') + '.ics'
+        $dlg.InitialDirectory = $expDir
+        if ($dlg.ShowDialog() -ne $true) { return }
+
+        [System.IO.File]::WriteAllText($dlg.FileName, $built.text, (New-Object System.Text.UTF8Encoding($false)))
+        $SetStatus.Text = '已导出 ' + $built.count + ' 条 → ' + [System.IO.Path]::GetFileName($dlg.FileName)
+        $SetStatus.Foreground = Brush '#30D158'
+    } catch {
+        $SetStatus.Text = '导出失败：' + $_.Exception.Message
+        $SetStatus.Foreground = Brush '#FF453A'
     }
 }
 
