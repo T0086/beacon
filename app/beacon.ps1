@@ -768,7 +768,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.9 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.10 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -2539,19 +2539,35 @@ function Expand-Orb {
     }
 
     $script:IsOpen = $true
-    $right = $w.Left + 470
-    $w.Width = 380
-    $w.Height = 560
-    $newLeft = $right - 380
 
-    # clamp only when the panel would fall outside every physical screen
-    $fits = $false
-    foreach ($sc in [System.Windows.Forms.Screen]::AllScreens) {
-        $b = $sc.Bounds
-        if ($newLeft -ge ($b.Left - 10) -and $newLeft -le ($b.Right - 120)) { $fits = $true; break }
-    }
-    if (-not $fits) { $newLeft = $wa.Left + 8 }
+    # 收起时的条是锚：面板怎么摆都从它算，收起时原样还回去。
+    $script:BarLeft = $w.Left
+    $script:BarTop  = $w.Top
+
+    # 面板贴哪一边，看条落在屏幕的哪个半边：靠左贴左，靠右贴右；
+    # 上下同理，条在下半屏时面板往上长。原来是永远贴右、永远往下，条在左边时
+    # 面板离屏幕边还差 90px，看着很别扭。
+    $scr = $null
+    try {
+        $pt = New-Object System.Drawing.Point([int]($script:BarLeft + 235), [int]($script:BarTop + 38))
+        $scr = [System.Windows.Forms.Screen]::FromPoint($pt)
+    } catch {}
+    if (-not $scr) { $scr = [System.Windows.Forms.Screen]::PrimaryScreen }
+    $b = $scr.Bounds
+
+    $newLeft = $(if (($script:BarLeft + 235) -lt ($b.Left + $b.Width / 2)) { $script:BarLeft } else { $script:BarLeft + 470 - 380 })
+    $newTop  = $(if (($script:BarTop + 38) -lt ($b.Top + $b.Height / 2)) { $script:BarTop } else { $script:BarTop + 76 - 560 })
+
+    # 再钳一次，别把面板推出这块屏
+    if ($newLeft -lt $b.Left) { $newLeft = $b.Left }
+    if (($newLeft + 380) -gt $b.Right) { $newLeft = $b.Right - 380 }
+    if ($newTop -lt $b.Top) { $newTop = $b.Top }
+    if (($newTop + 560) -gt $b.Bottom) { $newTop = $b.Bottom - 560 }
+
+    $w.Width  = 380
+    $w.Height = 560
     $w.Left = $newLeft
+    $w.Top  = $newTop
 
     $OrbView.Visibility = 'Collapsed'
     $PanelView.Visibility = 'Visible'
@@ -2564,10 +2580,11 @@ function Collapse-Orb {
     if (-not $script:IsOpen) { return }
     $script:IsOpen = $false
 
-    $right = $w.Left + $w.Width
-    $w.Width = 470
+    # 回到展开前的那个位置，不再假设"右下角锚定"
+    $w.Width  = 470
     $w.Height = 76
-    $w.Left = $right - 470
+    $w.Left = $script:BarLeft
+    $w.Top  = $script:BarTop
 
     $PanelView.Visibility = 'Collapsed'
     $OrbView.Visibility = 'Visible'
