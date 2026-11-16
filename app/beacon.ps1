@@ -768,7 +768,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.7 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.8 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -2293,15 +2293,38 @@ function Build-Ics {
         if (-not $n -or $n.done -or -not $n.due) { continue }
         $due = [string]$n.due
         if ($due -notmatch '^\d{4}-\d{2}-\d{2}$') { continue }
-        $next = ''
-        try { $next = ([datetime]::ParseExact($due, 'yyyy-MM-dd', $null)).AddDays(1).ToString('yyyyMMdd') } catch { continue }
+        $noteText = [string]$n.text
+
+        # 时间规则（KJ 定的）：备注里写了 HH:mm 就用它；没写就落到晚上 22:00。
+        # 时长：写了「X 小时 / X分钟」按它算，没写就一小时。
+        $hh = 22; $mm = 0
+        $tm = [regex]::Match($noteText, '(?<!\d)([01]?\d|2[0-3])[:：]([0-5]\d)(?!\d)')
+        if ($tm.Success) {
+            $hh = [int]$tm.Groups[1].Value
+            $mm = [int]$tm.Groups[2].Value
+        }
+        $mins = 60
+        $dm = [regex]::Match($noteText, '(\d+(?:\.\d+)?)\s*(小时|h|hr|hour)')
+        if ($dm.Success) {
+            $mins = [int][math]::Round([double]$dm.Groups[1].Value * 60)
+        } else {
+            $dm2 = [regex]::Match($noteText, '(\d+)\s*(分钟|min)')
+            if ($dm2.Success) { $mins = [int]$dm2.Groups[1].Value }
+        }
+        if ($mins -lt 15) { $mins = 15 }
+        if ($mins -gt 12 * 60) { $mins = 12 * 60 }
+
+        $startAt = $null
+        try { $startAt = [datetime]::ParseExact($due, 'yyyy-MM-dd', $null).AddHours($hh).AddMinutes($mm) } catch { continue }
+        $endAt = $startAt.AddMinutes($mins)
+
         [void]$lines.Add('BEGIN:VEVENT')
         [void]$lines.Add('UID:' + (New-IcsUid ('note|' + [string]$n.id + '|' + $due)))
         [void]$lines.Add('DTSTAMP:' + $stamp)
-        [void]$lines.Add('DTSTART;VALUE=DATE:' + ($due -replace '-', ''))
-        [void]$lines.Add('DTEND;VALUE=DATE:' + $next)
-        [void]$lines.Add('SUMMARY:' + (Escape-IcsText ([string]$n.text)))
-        [void]$lines.Add('DESCRIPTION:' + (Escape-IcsText '备忘 · 来自 beacon'))
+        [void]$lines.Add('DTSTART:' + $startAt.ToString('yyyyMMddTHHmmss'))
+        [void]$lines.Add('DTEND:' + $endAt.ToString('yyyyMMddTHHmmss'))
+        [void]$lines.Add('SUMMARY:' + (Escape-IcsText $noteText))
+        [void]$lines.Add('DESCRIPTION:' + (Escape-IcsText ('备忘 · 来自 beacon · ' + $mins + ' 分钟')))
         [void]$lines.Add('TRANSP:TRANSPARENT')
         [void]$lines.Add('END:VEVENT')
         $count++
