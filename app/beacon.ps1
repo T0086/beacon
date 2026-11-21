@@ -454,7 +454,7 @@ $xaml = @'
           </StackPanel>
         </Grid>
 
-        <Grid Grid.Column="2" VerticalAlignment="Center" Margin="0,0,4,0">
+        <Grid Grid.Column="2" VerticalAlignment="Center" Margin="0,0,6,0" HorizontalAlignment="Right">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="*"/>
