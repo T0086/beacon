@@ -420,10 +420,10 @@ $xaml = @'
             Background="#F0181B21" BorderBrush="#42FFFFFF" BorderThickness="1">
       <Grid Margin="15,0,10,0">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="72"/>
+          <ColumnDefinition Width="56"/>
           <ColumnDefinition Width="184"/>
           <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="48"/>
+          <ColumnDefinition Width="70"/>
         </Grid.ColumnDefinitions>
 
         <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,2,0">
@@ -469,7 +469,8 @@ $xaml = @'
           </StackPanel>
         </Grid>
 
-        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"
+                    HorizontalAlignment="Right">
           <Border x:Name="MemoBtn" Width="20" Height="22" Background="Transparent"
                   CornerRadius="5" Cursor="Hand" Margin="0,0,1,0" ToolTip="备忘录">
             <TextBlock x:Name="MemoIcon" Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets"
@@ -2820,9 +2821,16 @@ $w.Add_ContentRendered({
         $p0 = New-Object System.Windows.Point(0,0)
         $po = $OrbView.TranslatePoint($p0, $w)
         $pl = $LockBtn.TranslatePoint($p0, $w)
+        $pm = $MemoBtn.TranslatePoint($p0, $w)
+        $pg = $LayerBtn.TranslatePoint($p0, $w)
+        $need = $pg.X + $LayerBtn.ActualWidth
         $msg = "window=$($w.ActualWidth)x$($w.ActualHeight)`r`n" +
                "orb=$($OrbView.ActualWidth)x$($OrbView.ActualHeight) at $($po.X),$($po.Y)`r`n" +
-               "lock=$($LockBtn.ActualWidth)x$($LockBtn.ActualHeight) at $($pl.X),$($pl.Y)"
+               "memo=$($MemoBtn.ActualWidth)x$($MemoBtn.ActualHeight) at $($pm.X),$($pm.Y)`r`n" +
+               "lock=$($LockBtn.ActualWidth)x$($LockBtn.ActualHeight) at $($pl.X),$($pl.Y)`r`n" +
+               "layer=$($LayerBtn.ActualWidth)x$($LayerBtn.ActualHeight) at $($pg.X),$($pg.Y)`r`n" +
+               "layerRight=$([Math]::Round($need,1)) / windowRight=$($w.ActualWidth) -> " +
+               $(if ($need -le $w.ActualWidth) { 'OK 完整可见' } else { "被裁 $([Math]::Round($need - $w.ActualWidth,1))px" })
         [System.IO.File]::WriteAllText((Join-Path $Base 'layout.txt'), $msg, (New-Object System.Text.UTF8Encoding($false)))
     } catch {
         [System.IO.File]::WriteAllText((Join-Path $Base 'layout.txt'), "ERR: $($_.Exception.Message)", (New-Object System.Text.UTF8Encoding($false)))
