@@ -454,7 +454,7 @@ $xaml = @'
           </StackPanel>
         </Grid>
 
-        <Grid Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0">
+        <Grid Grid.Column="2" VerticalAlignment="Center" Margin="0,0,4,0">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="*"/>
@@ -470,20 +470,20 @@ $xaml = @'
         </Grid>
 
         <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-          <Border x:Name="MemoBtn" Width="24" Height="24" Background="Transparent"
-                  CornerRadius="5" Cursor="Hand" Margin="0,0,2,0" ToolTip="备忘录">
+          <Border x:Name="MemoBtn" Width="20" Height="22" Background="Transparent"
+                  CornerRadius="5" Cursor="Hand" Margin="0,0,1,0" ToolTip="备忘录">
             <TextBlock x:Name="MemoIcon" Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets"
                        FontSize="12" Foreground="#7A7A80"
                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
-          <Border x:Name="LockBtn" Width="24" Height="24" Background="Transparent"
+          <Border x:Name="LockBtn" Width="20" Height="22" Background="Transparent"
                   CornerRadius="5" Cursor="Hand">
             <TextBlock x:Name="LockIcon" Text="&#xE785;" FontFamily="Segoe MDL2 Assets"
                        FontSize="12" Foreground="#7A7A80"
                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
-          <Border x:Name="LayerBtn" Width="24" Height="24" Background="Transparent"
-                  CornerRadius="5" Cursor="Hand" Margin="2,0,0,0">
+          <Border x:Name="LayerBtn" Width="20" Height="22" Background="Transparent"
+                  CornerRadius="5" Cursor="Hand" Margin="1,0,0,0">
             <TextBlock x:Name="LayerIcon" Text="&#xE718;" FontFamily="Segoe MDL2 Assets"
                        FontSize="12" Foreground="#0A84FF"
                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
