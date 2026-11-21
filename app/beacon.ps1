@@ -376,7 +376,7 @@ $xaml = @'
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Orb" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
-        Width="470" Height="76"
+        Width="448" Height="76"
         FontFamily="Microsoft YaHei UI, Segoe UI, sans-serif">
   <Window.Resources>
     <Style x:Key="TabBtn" TargetType="Button">
@@ -416,17 +416,17 @@ $xaml = @'
   </Window.Resources>
   <Grid x:Name="Root">
 
-    <Border x:Name="OrbView" Width="470" Height="76" CornerRadius="14"
+    <Border x:Name="OrbView" Width="448" Height="76" CornerRadius="14"
             Background="#F0181B21" BorderBrush="#42FFFFFF" BorderThickness="1">
       <Grid Margin="15,0,10,0">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="56"/>
-          <ColumnDefinition Width="184"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto" MaxWidth="100"/>
           <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="70"/>
         </Grid.ColumnDefinitions>
 
-        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,2,0">
+        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,20,0">
           <TextBlock x:Name="ClockText" Text="--:--" Foreground="#FFFFFF" FontSize="17"
                      FontWeight="SemiBold" HorizontalAlignment="Left"/>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,2,0,0">
@@ -436,7 +436,7 @@ $xaml = @'
           </StackPanel>
         </StackPanel>
 
-        <Grid Grid.Column="1" VerticalAlignment="Center" Margin="0,0,16,0">
+        <Grid Grid.Column="1" VerticalAlignment="Center" Margin="0,0,20,0">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -454,7 +454,7 @@ $xaml = @'
           </StackPanel>
         </Grid>
 
-        <Grid Grid.Column="2" VerticalAlignment="Center" Margin="0,0,6,0" HorizontalAlignment="Right">
+        <Grid Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Left">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="*"/>
@@ -1014,7 +1014,7 @@ if ($script:PosPin -and $null -ne $script:PosLeft -and $null -ne $script:PosTop)
         $w.Left = $prefLeft
         $w.Top  = $prefTop
     } else {
-        $w.Left = $wa.Right - 470 - 28
+        $w.Left = $wa.Right - 448 - 28
         $w.Top  = $wa.Top + 20
     }
 }
@@ -1028,7 +1028,7 @@ foreach ($sc in [System.Windows.Forms.Screen]::AllScreens) {
         $w.Top  -ge ($b.Top  - 10)  -and $w.Top  -le ($b.Bottom - 40)) { $onScreen = $true; break }
 }
 if (-not $onScreen) {
-    $w.Left = $wa.Right - 470 - 28
+    $w.Left = $wa.Right - 448 - 28
     $w.Top  = $wa.Top + 150
 }
 
@@ -2698,13 +2698,13 @@ function Expand-Orb {
     # 面板离屏幕边还差 90px，看着很别扭。
     $scr = $null
     try {
-        $pt = New-Object System.Drawing.Point([int]($script:BarLeft + 235), [int]($script:BarTop + 38))
+        $pt = New-Object System.Drawing.Point([int]($script:BarLeft + 224), [int]($script:BarTop + 38))
         $scr = [System.Windows.Forms.Screen]::FromPoint($pt)
     } catch {}
     if (-not $scr) { $scr = [System.Windows.Forms.Screen]::PrimaryScreen }
     $b = $scr.Bounds
 
-    $newLeft = $(if (($script:BarLeft + 235) -lt ($b.Left + $b.Width / 2)) { $script:BarLeft } else { $script:BarLeft + 470 - 380 })
+    $newLeft = $(if (($script:BarLeft + 224) -lt ($b.Left + $b.Width / 2)) { $script:BarLeft } else { $script:BarLeft + 448 - 380 })
     $newTop  = $(if (($script:BarTop + 38) -lt ($b.Top + $b.Height / 2)) { $script:BarTop } else { $script:BarTop + 76 - 560 })
 
     # 再钳一次，别把面板推出这块屏
@@ -2730,7 +2730,7 @@ function Collapse-Orb {
     $script:IsOpen = $false
 
     # 回到展开前的那个位置，不再假设"右下角锚定"
-    $w.Width  = 470
+    $w.Width  = 448
     $w.Height = 76
     $w.Left = $script:BarLeft
     $w.Top  = $script:BarTop
