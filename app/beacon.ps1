@@ -1,6 +1,7 @@
 ﻿param(
     [switch]$AutoStart,
-    [switch]$TestExpand
+    [switch]$TestExpand,
+    [switch]$SelfTest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,9 +11,11 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 # ---------------------------------------------------------------- single instance guard
 # Without this, every restart leaves a ghost tray icon behind and a second copy
 # can be launched by both the scheduled task and a manual double-click.
-$script:OrbMutex = New-Object System.Threading.Mutex($false, 'Global\Beacon_SingleInstance')
-if (-not $script:OrbMutex.WaitOne(0)) {
-    exit
+if (-not $SelfTest) {
+    $script:OrbMutex = New-Object System.Threading.Mutex($false, 'Global\Beacon_SingleInstance')
+    if (-not $script:OrbMutex.WaitOne(0)) {
+        exit
+    }
 }
 
 # make the process DPI-aware so mouse hit-testing is correct on monitors
@@ -240,6 +243,54 @@ function Load-Notes {
     return @()
 }
 
+function Reload-Notes {
+    # 外部（beacon-sync / 别处写入）改过 notes.json 时内存里那份是旧的；
+    # 开面板、刷新、定时重绘之前从这里重读一次。读不懂就保持原样，不把内存清空。
+    try {
+        if (-not (Test-Path $NotesPath)) { return }
+        $raw = [System.IO.File]::ReadAllText($NotesPath, [System.Text.Encoding]::UTF8)
+        if (-not $raw -or -not $raw.Trim()) { return }
+        $o = $raw | ConvertFrom-Json
+        if ($null -eq $o) { return }
+        $items = @($o.items | Where-Object { $null -ne $_ })
+        foreach ($it in $items) {
+            if ($null -ne $it.due -and $it.due -isnot [string]) {
+                $it.due = ([datetime]$it.due).ToString('yyyy-MM-dd')
+            }
+        }
+        $script:Notes = $items
+    } catch {}
+}
+
+function Get-AgendaDays {
+    # 日程列表取哪几天：有课的日期 ∪ 有截止日的备忘日期（都 >= 今天），排序取前 5 天。
+    # 原来只按「有课的日子」取 key，于是「今天只有备忘」「备忘落在没课那天」整块被吃掉。
+    $todayKey = (Get-Date).ToString('yyyy-MM-dd')
+    $days = [ordered]@{}
+    $cls  = @{}
+    $nts  = @{}
+
+    foreach ($e in @($script:Events)) {
+        if ($null -eq $e -or -not $e.date) { continue }
+        $d = [string]$e.date
+        if ($d -lt $todayKey) { continue }
+        if (-not $days.Contains($d)) { $days[$d] = $true; $cls[$d] = @() }
+        $cls[$d] = @($cls[$d]) + $e
+    }
+
+    foreach ($n in @($script:Notes)) {
+        if ($null -eq $n -or $n.done -or -not $n.due) { continue }
+        $d = [string]$n.due
+        if ($d -lt $todayKey) { continue }
+        if (-not $days.Contains($d)) { $days[$d] = $true }
+        if (-not $nts.ContainsKey($d)) { $nts[$d] = @() }
+        $nts[$d] = @($nts[$d]) + $n
+    }
+
+    $keys = @($days.Keys | Sort-Object | Select-Object -First 5)
+    return [pscustomobject]@{ Today = $todayKey; Keys = $keys; Classes = $cls; Notes = $nts }
+}
+
 function Save-Notes($items) {
     $arr = @()
     if ($null -ne $items) { $arr = @($items | Where-Object { $null -ne $_ }) }
@@ -249,6 +300,29 @@ function Save-Notes($items) {
 }
 
 $Notes = Load-Notes
+
+if ($SelfTest) {
+    # 只读自检：打印「日程会显示哪几天、每天几条」，供命令行验数据与取日期的逻辑。
+    $a = Get-AgendaDays
+    Write-Output ('today=' + $a.Today)
+    Write-Output ('notes=' + @($script:Notes).Count)
+    foreach ($k in @($a.Keys)) {
+        $c = 0
+        if ($a.Classes.ContainsKey($k)) { $c = @($a.Classes[$k]).Count }
+        $n = 0
+        if ($a.Notes.ContainsKey($k)) { $n = @($a.Notes[$k]).Count }
+        Write-Output ("day=$k classes=$c notes=$n")
+    }
+    foreach ($x in @($script:Notes)) {
+        $d = 'null'
+        if ($x.due) { $d = [string]$x.due }
+        $dn = 'false'
+        if ($x.done) { $dn = 'true' }
+        Write-Output ("note due=$d done=$dn id=$($x.id)")
+    }
+    exit 0
+}
+
 
 # pending due date for the note being written; null = no date
 $script:DueDate  = $null
@@ -396,6 +470,12 @@ $xaml = @'
         </Grid>
 
         <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+          <Border x:Name="MemoBtn" Width="24" Height="24" Background="Transparent"
+                  CornerRadius="5" Cursor="Hand" Margin="0,0,2,0" ToolTip="备忘录">
+            <TextBlock x:Name="MemoIcon" Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets"
+                       FontSize="12" Foreground="#7A7A80"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
           <Border x:Name="LockBtn" Width="24" Height="24" Background="Transparent"
                   CornerRadius="5" Cursor="Hand">
             <TextBlock x:Name="LockIcon" Text="&#xE785;" FontFamily="Segoe MDL2 Assets"
@@ -768,7 +848,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.10 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.11 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -824,6 +904,7 @@ $MvDayEvents  = $w.FindName('MvDayEvents')
 $MvPrev       = $w.FindName('MvPrev')
 $MvNext       = $w.FindName('MvNext')
 $SettingsBtn  = $w.FindName('SettingsBtn')
+$MemoBtn      = $w.FindName('MemoBtn')
 $LockBtn      = $w.FindName('LockBtn')
 $LockIcon     = $w.FindName('LockIcon')
 $LayerBtn     = $w.FindName('LayerBtn')
@@ -892,6 +973,12 @@ $CalPrev   = $w.FindName('CalPrev')
 $CalNext   = $w.FindName('CalNext')
 
 # ---------------------------------------------------------------- placement
+# 安全启动：上次如果没干净退出，lock 还留着，就别信「上次位置」——
+# 崩溃/断电时存下来的坐标经常是半截的，照着恢复会让条子跑到屏幕外或者叠在任务栏上。
+$LockPath = Join-Path $Base 'ctl\running.lock'
+$safeMode = Test-Path $LockPath
+try { New-Item -ItemType Directory -Force -Path (Split-Path $LockPath) | Out-Null } catch {}
+try { Set-Content -Path $LockPath -Value (Get-Date -Format 'o') -Encoding UTF8 } catch {}
 $wa = [System.Windows.SystemParameters]::WorkArea
 $state = Load-State
 $script:GpuPick    = [string]$state.GpuPick
@@ -904,7 +991,7 @@ $script:PosTop     = $state.PosTop
 if ($script:PosPin -and $null -ne $script:PosLeft -and $null -ne $script:PosTop) {
     $w.Left = $script:PosLeft
     $w.Top  = $script:PosTop
-} elseif ($null -ne $state.Left -and $null -ne $state.Top) {
+} elseif (-not $safeMode -and $null -ne $state.Left -and $null -ne $state.Top) {
     $w.Left = $state.Left
     $w.Top  = $state.Top
 } else {
@@ -1671,6 +1758,17 @@ function Set-NoActivate {
 
 $w.Add_SourceInitialized({ Set-NoActivate; if ($script:OnTop) { Set-OnTop $true } })
 
+# 2026-11-21：NOACTIVATE 让这个窗口永远拿不到键盘焦点，备忘输入框于是打不进字。
+# 点输入框时临时允许激活并抢一次焦点，窗口失焦后再恢复 NOACTIVATE（游戏里仍然不抢焦点）。
+function Set-Activatable([bool]$on) {
+    try {
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
+        $ex = [int][OrbWin32]::GetWindowLong($hwnd, -20)
+        if ($on) { $ex = $ex -band (-bnot 0x08000000) } else { $ex = $ex -bor 0x08000000 }
+        [void][OrbWin32]::SetWindowLong($hwnd, -20, $ex)
+    } catch {}
+}
+
 function Show-UnlockPatch {
     try {
         if (-not $script:UnlockWin) {
@@ -1686,19 +1784,38 @@ function Show-UnlockPatch {
             $uw.Add_MouseLeftButtonUp({
                 param($s, $ev)
                 $ev.Handled = $true
-                $script:Locked = $false
-                Update-LockUI
+                # 2026-11-21 KJ：锁定时左半边是「备忘录」（只开详细页，不解锁），右半边才是解锁
+                $x = 0
+                try { $x = $ev.GetPosition($script:UnlockWin).X } catch {}
+                if ($script:PatchMemoW -gt 0 -and $x -lt $script:PatchMemoW) {
+                    Expand-Orb
+                    $script:PeekOpen = $true
+                    Set-ClickThrough $false
+                } else {
+                    $script:Locked = $false
+                    Update-LockUI
+                }
             })
             $script:UnlockWin = $uw
         }
-        if ($LockBtn.ActualWidth -gt 0) {
+        $脚本 = $script:UnlockWin
+        if ($MemoBtn -and $MemoBtn.ActualWidth -gt 0 -and $LockBtn.ActualWidth -gt 0) {
+            $p1 = $MemoBtn.TranslatePoint((New-Object System.Windows.Point(0, 0)), $w)
+            $p2 = $LockBtn.TranslatePoint((New-Object System.Windows.Point(0, 0)), $w)
+            $script:PatchMemoW = ([double]$MemoBtn.ActualWidth) + 2
+            $脚本.Width  = [double]($p2.X + $LockBtn.ActualWidth - $p1.X) + 10
+            $脚本.Height = [double]([Math]::Max($LockBtn.ActualHeight, $MemoBtn.ActualHeight)) + 10
+            $脚本.Left   = $w.Left + $p1.X - 5
+            $脚本.Top    = $w.Top  + $p1.Y - 5
+        } elseif ($LockBtn.ActualWidth -gt 0) {
             $p = $LockBtn.TranslatePoint((New-Object System.Windows.Point(0, 0)), $w)
-            $script:UnlockWin.Width  = [double]$LockBtn.ActualWidth + 10
-            $script:UnlockWin.Height = [double]$LockBtn.ActualHeight + 10
-            $script:UnlockWin.Left   = $w.Left + $p.X - 5
-            $script:UnlockWin.Top    = $w.Top  + $p.Y - 5
+            $script:PatchMemoW = 0
+            $脚本.Width  = [double]$LockBtn.ActualWidth + 10
+            $脚本.Height = [double]$LockBtn.ActualHeight + 10
+            $脚本.Left   = $w.Left + $p.X - 5
+            $脚本.Top    = $w.Top  + $p.Y - 5
         }
-        if (-not $script:UnlockWin.IsVisible) { $script:UnlockWin.Show() }
+        if (-not $脚本.IsVisible) { $脚本.Show() }
     } catch {}
 }
 
@@ -1748,6 +1865,17 @@ $LockBtn.Add_MouseLeftButtonUp({
     Update-LockUI
 })
 
+$MemoBtn.Add_MouseLeftButtonDown({
+    param($s, $ev)
+    $ev.Handled = $true
+    try { [void]$MemoBtn.CaptureMouse() } catch {}
+})
+$MemoBtn.Add_MouseLeftButtonUp({
+    param($s, $ev)
+    $ev.Handled = $true
+    try { [void]$MemoBtn.ReleaseMouseCapture() } catch {}
+    Expand-Orb
+})
 $LayerBtn.Add_MouseLeftButtonUp({
     param($s, $ev)
     $ev.Handled = $true
@@ -1887,12 +2015,37 @@ function Add-DeadlineRow($n) {
     $ClassList.Children.Add($border) | Out-Null
 }
 
+function Dump-AgendaUi {
+    # walk what is actually painted in ClassList and write it out line by line.
+    # used from ctl: "dump" -> ctl\ui-dump.txt, so a command line can check the panel without a screen.
+    try {
+        $lines = @()
+        foreach ($c in $ClassList.Children) {
+            $txts = @()
+            $queue = @($c)
+            $guard = 0
+            while ($queue.Count -gt 0 -and $guard -lt 4000) {
+                $guard++
+                $cur = $queue[0]
+                $queue = @($queue | Select-Object -Skip 1)
+                if ($null -eq $cur) { continue }
+                if ($cur -is [System.Windows.Controls.TextBlock]) { $txts += [string]$cur.Text; continue }
+                if ($cur -is [System.Windows.Controls.Border] -and $cur.Child) { $queue += $cur.Child; continue }
+                if ($cur -is [System.Windows.Controls.StackPanel]) { foreach ($ch in $cur.Children) { $queue += $ch }; continue }
+                if ($cur -is [System.Windows.Controls.Grid]) { foreach ($ch in $cur.Children) { $queue += $ch }; continue }
+            }
+            $lines += ($txts -join ' | ')
+        }
+        $outPath = Join-Path $CtlDir 'ui-dump.txt'
+        [System.IO.File]::WriteAllText($outPath, ($lines -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+    } catch { Write-Err 'dump' }
+}
 function Render-Classes {
     $ClassList.Children.Clear()
-    $todayKey = (Get-Date).ToString('yyyy-MM-dd')
-    $up = @($script:Events | Where-Object { $_.date -ge $todayKey } | Sort-Object start)
+    $a = Get-AgendaDays
+    $keys = @($a.Keys)
 
-    if ($up.Count -eq 0) {
+    if ($keys.Count -eq 0) {
         $t = New-Object System.Windows.Controls.TextBlock
         $t.Text = '这一学期没有更多课程了'
         $t.Foreground = Brush '#A8A8B0'
@@ -1902,26 +2055,13 @@ function Render-Classes {
         return
     }
 
-    $byDay = [ordered]@{}
-    foreach ($e in $up) {
-        if (-not $byDay.Contains($e.date)) { $byDay[$e.date] = @() }
-        $byDay[$e.date] = @($byDay[$e.date]) + $e
-    }
-    $keys = @($byDay.Keys | Sort-Object | Select-Object -First 5)
     foreach ($k in $keys) {
         Add-DayHeader $k
-        foreach ($e in $byDay[$k]) { Add-ClassRow $e }
-        $dueNotes = @($script:Notes | Where-Object { -not $_.done -and $_.due -and ([string]$_.due) -eq $k })
-        foreach ($n in $dueNotes) { Add-DeadlineRow $n }
-    }
-
-    # deadlines today even if there is no class today
-    $todayKey2 = (Get-Date).ToString('yyyy-MM-dd')
-    if (-not $byDay.Contains($todayKey2)) {
-        $todayDue = @($script:Notes | Where-Object { -not $_.done -and $_.due -and ([string]$_.due) -eq $todayKey2 })
-        if ($todayDue.Count -gt 0) {
-            Add-DayHeader $todayKey2
-            foreach ($n in $todayDue) { Add-DeadlineRow $n }
+        if ($a.Classes.ContainsKey($k)) {
+            foreach ($e in @($a.Classes[$k])) { Add-ClassRow $e }
+        }
+        if ($a.Notes.ContainsKey($k)) {
+            foreach ($n in @($a.Notes[$k])) { Add-DeadlineRow $n }
         }
     }
 }
@@ -2469,10 +2609,17 @@ function Add-Note {
         $script:DueDate = $null
         $DueChip.Visibility = 'Collapsed'
         Render-Notes
+        Render-Classes
     } catch {
         Write-Err 'add-note'
     }
 }
+
+$NoteInput.Add_PreviewMouseLeftButtonDown({
+    Set-Activatable $true
+    try { $w.Activate() } catch {}
+})
+$w.Add_Deactivated({ Set-Activatable $false })
 
 $NoteInput.Add_TextChanged({
     if ($NoteInput.Text) { $NoteHint.Visibility = 'Collapsed' } else { $NoteHint.Visibility = 'Visible' }
@@ -2531,6 +2678,7 @@ function Expand-Orb {
     if ($script:IsOpen) { return }
 
     try {
+        Reload-Notes
         Render-Classes
         Render-Notes
     } catch {
@@ -2588,6 +2736,8 @@ function Collapse-Orb {
 
     $PanelView.Visibility = 'Collapsed'
     $OrbView.Visibility = 'Visible'
+    # 锁定状态下看过详细页，收起后要恢复穿透
+    if ($script:PeekOpen) { $script:PeekOpen = $false; if ($script:Locked) { Set-ClickThrough $true } }
     Save-State
     Update-Orb
 }
@@ -2690,6 +2840,8 @@ $metricTimer.Start()
 # ghost. Every shutdown path therefore funnels through this one function.
 function Invoke-BeaconStop {
     try { Save-State } catch {}
+    # 正常退出：清掉 lock，下次启动才不算「意外退出」
+    try { Remove-Item (Join-Path $Base 'ctl\running.lock') -Force -ErrorAction SilentlyContinue } catch {}
     try { $ni.Visible = $false; $ni.Dispose() } catch {}
     try { $script:OrbMutex.ReleaseMutex() } catch {}
     try { $w.Close() } catch {}
@@ -2758,7 +2910,8 @@ function Invoke-CtlCommand([string]$Verb, [string]$Arg) {
         'collapse' { Collapse-Orb; Write-CtlResult 'collapse' 'ok' }
         'lock'     { $script:Locked = $true; Update-LockUI; Write-CtlResult 'lock' 'ok' }
         'unlock'   { $script:Locked = $false; Update-LockUI; Write-CtlResult 'unlock' 'ok' }
-        'refresh'  { if ($script:IsOpen) { Render-Classes }; Write-CtlResult 'refresh' 'ok' }
+        'refresh'  { Reload-Notes; if ($script:IsOpen) { Render-Classes; Render-Notes }; Write-CtlResult 'refresh' 'ok' }
+        'dump'     { Dump-AgendaUi; Write-CtlResult 'dump' 'ok' }
         'ping'     { Write-CtlResult 'ping' 'ok' }
         default    { Write-CtlResult $Verb 'unknown' }
     }
@@ -2793,6 +2946,7 @@ Write-BeaconHeartbeat
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMinutes(5)
 $timer.Add_Tick({
+    Reload-Notes
     if ($script:IsOpen) { Render-Classes }
 })
 $timer.Start()
