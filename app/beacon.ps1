@@ -2216,6 +2216,20 @@ function Set-NoActivate {
     } catch {}
 }
 
+# WS_EX_TOOLWINDOW (0x80): 工具窗不进 Alt+Tab、也不进任务栏。
+# 2026-11-23 KJ：主窗和它那几个钟表窗在 Alt+Tab 里各占一格，烦。把主窗也标成工具窗，
+# 连带 owned window 一起，Alt+Tab 里就彻底没有 beacon 了。
+function Set-ToolWindow {
+    try {
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
+        if ($hwnd -eq [IntPtr]::Zero) { return }
+        $ex = [int][OrbWin32]::GetWindowLong($hwnd, -20)
+        $ex = ($ex -bor 0x00000080) -band (-bnot 0x00040000)
+        [void][OrbWin32]::SetWindowLong($hwnd, -20, $ex)
+        $script:ToolWindow = $true
+    } catch {}
+}
+
 $w.Add_SourceInitialized({ Set-NoActivate; if ($script:OnTop) { Set-OnTop $true } })
 
 # 2026-11-21：NOACTIVATE 让这个窗口永远拿不到键盘焦点，备忘输入框于是打不进字。
@@ -2318,6 +2332,7 @@ function Update-LockUI {
 # 补丁窗会算不出矩形而根本不显示 —— 锁定时四个按钮就全点不到。所以等布局完成再刷一次。
 $w.Add_Loaded({
     try { Update-LockUI } catch {}
+    Set-ToolWindow
 })
 
 function Update-LayerUI {
