@@ -859,9 +859,28 @@ $settingsXaml = @'
                            Foreground="#F5F5F7" CaretBrush="#F5F5F7" Padding="11,9" FontSize="11.5"/>
                   <TextBlock x:Name="ClockNamePh" Grid.Column="0" Text="地名，如 深圳" IsHitTestVisible="False"
                              Foreground="#4E4E54" FontSize="11.5" Margin="13,0,0,0" VerticalAlignment="Center"/>
-                  <ComboBox x:Name="ClockZoneInput" Grid.Column="1" Width="158" Margin="0,0,5,0"
-                            Background="Transparent" BorderThickness="0" Foreground="#F5F5F7"
-                            FontSize="11" VerticalAlignment="Center"/>
+                  <!-- 2026-11-23：ComboBox 的默认模板会把 Background 吃掉，白底白字根本看不清。
+                       换成一个完全自己画的「◀ 时区 ▶」选择器，颜色说了算。 -->
+                  <Grid Grid.Column="1" Width="196" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="22"/>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="22"/>
+                    </Grid.ColumnDefinitions>
+                    <Border x:Name="ZonePrev" Grid.Column="0" Background="#2AFFFFFF" CornerRadius="6" Cursor="Hand">
+                      <TextBlock Text="&#xE76B;" FontFamily="Segoe MDL2 Assets" FontSize="8"
+                                 Foreground="#D8D8DE" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border x:Name="ZoneBox" Grid.Column="1" Background="#1FFFFFFF" CornerRadius="6" Margin="4,0">
+                      <TextBlock x:Name="ZoneText" Text="选出区" FontSize="10.5" Foreground="#FFFFFF"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis"/>
+                    </Border>
+                    <Border x:Name="ZoneNext" Grid.Column="2" Background="#2AFFFFFF" CornerRadius="6" Cursor="Hand">
+                      <TextBlock Text="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="8"
+                                 Foreground="#D8D8DE" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                  </Grid>
                 </Grid>
               </Border>
               <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
@@ -1005,7 +1024,9 @@ $SetPaneClock    = $sw.FindName('SetPaneClock')
 $ClockList       = $sw.FindName('ClockList')
 $ClockNameInput  = $sw.FindName('ClockNameInput')
 $ClockNamePh     = $sw.FindName('ClockNamePh')
-$ClockZoneInput  = $sw.FindName('ClockZoneInput')
+$ZonePrev        = $sw.FindName('ZonePrev')
+$ZoneNext        = $sw.FindName('ZoneNext')
+$ZoneText        = $sw.FindName('ZoneText')
 $ClockAddBtn     = $sw.FindName('ClockAddBtn')
 $ClockHint       = $sw.FindName('ClockHint')
 $SetPosXPh       = $sw.FindName('SetPosXPh')
@@ -1774,29 +1795,41 @@ $script:ClockWins  = @()
 $script:ClockOpen  = $false
 
 $script:ClockZones = @(
-    'Europe/London', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Singapore', 'Asia/Bangkok', 'Asia/Dubai',
+    'Europe/London', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore', 'Asia/Bangkok',
+    'Asia/Kolkata', 'Asia/Dubai',
     'America/Toronto', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'America/Vancouver',
-    'Europe/Paris', 'Europe/Berlin', 'Australia/Sydney', 'Pacific/Auckland'
+    'America/Mexico_City', 'America/Sao_Paulo', 'America/Argentina/Buenos_Aires',
+    'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+    'Africa/Cairo', 'Africa/Johannesburg',
+    'Australia/Sydney', 'Pacific/Auckland'
 )
 
 # PS 5.1 跑在 .NET Framework 上，FindSystemTimeZoneById 只认 Windows 时区 ID，
 # 不认 IANA 名（Europe/London 这种会直接抛）。清单里存 IANA 方便人读，解析时查这张表。
 $script:ZoneMap = @{
-    'Europe/London'       = 'GMT Standard Time'
-    'Asia/Shanghai'       = 'China Standard Time'
-    'Asia/Tokyo'          = 'Tokyo Standard Time'
-    'Asia/Singapore'      = 'Singapore Standard Time'
-    'Asia/Bangkok'        = 'SE Asia Standard Time'
-    'Asia/Dubai'          = 'Arabian Standard Time'
-    'America/Toronto'     = 'Eastern Standard Time'
-    'America/New_York'    = 'Eastern Standard Time'
-    'America/Chicago'     = 'Central Standard Time'
-    'America/Los_Angeles' = 'Pacific Standard Time'
-    'America/Vancouver'   = 'Pacific Standard Time'
-    'Europe/Paris'        = 'Romance Standard Time'
-    'Europe/Berlin'       = 'W. Europe Standard Time'
-    'Australia/Sydney'    = 'AUS Eastern Standard Time'
-    'Pacific/Auckland'    = 'New Zealand Standard Time'
+    'Europe/London'                   = 'GMT Standard Time'
+    'Asia/Shanghai'                   = 'China Standard Time'
+    'Asia/Tokyo'                      = 'Tokyo Standard Time'
+    'Asia/Seoul'                      = 'Korea Standard Time'
+    'Asia/Singapore'                  = 'Singapore Standard Time'
+    'Asia/Bangkok'                    = 'SE Asia Standard Time'
+    'Asia/Kolkata'                    = 'India Standard Time'
+    'Asia/Dubai'                      = 'Arabian Standard Time'
+    'America/Toronto'                 = 'Eastern Standard Time'
+    'America/New_York'                = 'Eastern Standard Time'
+    'America/Chicago'                 = 'Central Standard Time'
+    'America/Los_Angeles'             = 'Pacific Standard Time'
+    'America/Vancouver'               = 'Pacific Standard Time'
+    'America/Mexico_City'             = 'Central Standard Time (Mexico)'
+    'America/Sao_Paulo'               = 'E. South America Standard Time'
+    'America/Argentina/Buenos_Aires'  = 'Argentina Standard Time'
+    'Europe/Paris'                    = 'Romance Standard Time'
+    'Europe/Berlin'                   = 'W. Europe Standard Time'
+    'Europe/Moscow'                   = 'Russian Standard Time'
+    'Africa/Cairo'                    = 'Egypt Standard Time'
+    'Africa/Johannesburg'             = 'South Africa Standard Time'
+    'Australia/Sydney'                = 'AUS Eastern Standard Time'
+    'Pacific/Auckland'                = 'New Zealand Standard Time'
 }
 
 function Resolve-Zone([string]$id) {
@@ -1836,42 +1869,49 @@ function New-ClockWindow {
     $cw.ShowInTaskbar      = $false
     $cw.ResizeMode         = 'NoResize'
     $cw.ShowActivated      = $false
-    $cw.Width              = 138
-    $cw.Height             = 78
+    $cw.Width              = 228
+    $cw.Height             = 34
 
     $bd = New-Object System.Windows.Controls.Border
-    $bd.CornerRadius    = '14'
+    $bd.CornerRadius    = '10'
     $bd.Background      = Brush '#F0181B21'
     $bd.BorderBrush     = Brush '#42FFFFFF'
     $bd.BorderThickness = '1'
     $bd.Padding         = '0'
 
-    $sp = New-Object System.Windows.Controls.StackPanel
-    $sp.HorizontalAlignment = 'Center'
-    $sp.VerticalAlignment   = 'Center'
+    # 2026-11-23 KJ：要「百叶窗」那种短横条 —— 左边地名，右边时间和日期。
+    $dp = New-Object System.Windows.Controls.DockPanel
+    $dp.LastChildFill = $true
+    $dp.Margin = '13,0,11,0'
+
+    $右 = New-Object System.Windows.Controls.StackPanel
+    $右.Orientation = 'Horizontal'
+    $右.VerticalAlignment = 'Center'
+    [System.Windows.Controls.DockPanel]::SetDock($右, 'Right')
 
     $tName = New-Object System.Windows.Controls.TextBlock
-    $tName.FontSize          = 10.5
-    $tName.Foreground        = Brush '#8A8A90'
-    $tName.HorizontalAlignment = 'Center'
+    $tName.FontSize          = 11.5
+    $tName.Foreground        = Brush '#D2D2D8'
+    $tName.VerticalAlignment = 'Center'
+    $tName.TextTrimming      = 'CharacterEllipsis'
 
     $tTime = New-Object System.Windows.Controls.TextBlock
-    $tTime.FontSize          = 21
+    $tTime.FontSize          = 15
     $tTime.FontWeight        = 'SemiBold'
     $tTime.Foreground        = Brush '#FFFFFF'
-    $tTime.HorizontalAlignment = 'Center'
-    $tTime.Margin            = '0,2,0,0'
+    $tTime.VerticalAlignment = 'Center'
 
     $tDay = New-Object System.Windows.Controls.TextBlock
     $tDay.FontSize           = 9.5
-    $tDay.Foreground         = Brush '#6E6E73'
-    $tDay.HorizontalAlignment = 'Center'
-    $tDay.Margin             = '0,3,0,0'
+    $tDay.Foreground         = Brush '#7A7A80'
+    $tDay.VerticalAlignment  = 'Center'
+    $tDay.Margin             = '8,1,0,0'
 
-    [void]$sp.Children.Add($tName)
-    [void]$sp.Children.Add($tTime)
-    [void]$sp.Children.Add($tDay)
-    $bd.Child = $sp
+    [void]$右.Children.Add($tTime)
+    [void]$右.Children.Add($tDay)
+    [void]$dp.Children.Add($右)
+    [void]$dp.Children.Add($tName)
+    $bd.Child = $dp
     $cw.Content = $bd
 
     # Add-Member 默认会把对象吐到管道里；不吞掉的话 New-ClockWindow 的返回值会变成
@@ -1920,29 +1960,68 @@ function Update-WorldClocks {
             }
         } catch {}
         try {
-            # 跟着主窗走：2 秒对一次位置，拖动时不会掉队
-            $cw.Left = $left + $i * (138 + 8)
-            $cw.Top  = $top
+            # 横条竖着叠（百叶窗），每条 34 高、间隔 4
+            $cw.Left = $left
+            $cw.Top  = $top + $i * (34 + 4)
         } catch {}
     }
 }
 
 function Show-WorldClocks([bool]$on) {
     $script:ClockOpen = $on
-    try {
-        [System.IO.File]::WriteAllText((Join-Path $Base 'clock-debug.txt'),
-            ("on=" + $on + " clocks=" + @($script:Clocks).Count + " wins=" + @($script:ClockWins).Count +
-             " zones=" + ((@($script:Clocks) | ForEach-Object { [string]$_.Zone }) -join '|')),
-            (New-Object System.Text.UTF8Encoding($false)))
-    } catch {}
+    $日志 = ''
     if ($on) {
         if ($script:ClockWins.Count -eq 0) { Build-WorldClocks }
-        foreach ($cw in @($script:ClockWins)) { try { if (-not $cw.IsVisible) { $cw.Show() } } catch {} }
+        foreach ($cw in @($script:ClockWins)) {
+            try { if (-not $cw.IsVisible) { $cw.Show() } } catch { $日志 += ('|EX:' + $_.Exception.Message) }
+            $日志 += ('|' + $cw.Zone + ' vis=' + $cw.IsVisible + ' txt=' + [string]$cw.TxtTime.Text + ' @' + [int]$cw.Left + ',' + [int]$cw.Top + ' ' + [int]$cw.Width + 'x' + [int]$cw.Height)
+        }
         Update-WorldClocks
+        $日志 = ''
+        foreach ($cw in @($script:ClockWins)) {
+            $日志 += ('|' + $cw.Zone + ' vis=' + $cw.IsVisible + ' txt=[' + [string]$cw.TxtTime.Text + '] name=[' + [string]$cw.TxtName.Text + '] @' + [int]$cw.Left + ',' + [int]$cw.Top)
+        }
     } else {
         foreach ($cw in @($script:ClockWins)) { try { $cw.Hide() } catch {} }
     }
+    try {
+        [System.IO.File]::WriteAllText((Join-Path $Base 'clock-debug.txt'),
+            ("on=" + $on + " clocks=" + @($script:Clocks).Count + " wins=" + @($script:ClockWins).Count + $日志),
+            (New-Object System.Text.UTF8Encoding($false)))
+    } catch {}
     try { $ClockIcon.Foreground = Brush $(if ($on) { '#0A84FF' } else { '#7A7A80' }) } catch {}
+}
+
+function New-ClockRowBtn([string]$txt, [int]$tag, [string]$color) {
+    $b = New-Object System.Windows.Controls.Button
+    $b.Content = $txt
+    $b.Tag = $tag
+    $b.Width = 22
+    $b.Height = 22
+    $b.Margin = '0,0,2,0'
+    $b.Background = 'Transparent'
+    $b.Foreground = Brush $color
+    $b.BorderThickness = '0'
+    $b.FontSize = 11
+    $b.Cursor = 'Hand'
+    $b.Padding = '0'
+    return $b
+}
+
+function Move-Clock([int]$i, [int]$delta) {
+    try {
+        $列 = @($script:Clocks)
+        $j = $i + $delta
+        if ($i -lt 0 -or $j -lt 0 -or $i -ge $列.Count -or $j -ge $列.Count) { return }
+        $tmp = $列[$i]
+        $列[$i] = $列[$j]
+        $列[$j] = $tmp
+        $script:Clocks = $列
+        Save-State
+        Render-ClockList
+        Build-WorldClocks
+        if ($script:ClockOpen) { Show-WorldClocks $true } else { Show-WorldClocks $false }
+    } catch {}
 }
 
 function Render-ClockList {
@@ -1951,7 +2030,7 @@ function Render-ClockList {
     if ($列.Count -eq 0) {
         $t = New-Object System.Windows.Controls.TextBlock
         $t.Text = '还没有地区，下面加一个'
-        $t.Foreground = Brush '#6E6E73'
+        $t.Foreground = Brush '#9A9AA2'
         $t.FontSize = 10.5
         $t.Margin = '2,0,0,0'
         [void]$ClockList.Children.Add($t)
@@ -1959,37 +2038,21 @@ function Render-ClockList {
     }
     $idx = 0
     foreach ($c in $列) {
-        $g = New-Object System.Windows.Controls.Grid
-        $g.Margin = '0,0,0,6'
-        $g.Tag = $idx
+        #{ 每行：左边名字+时区，右边 ↑ ↓ ✕
+        $dp = New-Object System.Windows.Controls.DockPanel
+        $dp.Margin = '0,0,0,10'
+        $dp.LastChildFill = $true
 
-        $nm = New-Object System.Windows.Controls.TextBlock
-        $nm.Text = [string]$c.Name
-        $nm.Foreground = Brush '#F5F5F7'
-        $nm.FontSize = 11.5
-        $nm.VerticalAlignment = 'Center'
-        [void]$g.Children.Add($nm)
+        $右 = New-Object System.Windows.Controls.StackPanel
+        $右.Orientation = 'Horizontal'
+        $右.VerticalAlignment = 'Center'
+        [System.Windows.Controls.DockPanel]::SetDock($右, 'Right')
 
-        $zn = New-Object System.Windows.Controls.TextBlock
-        $zn.Text = Get-ZoneLabel ([string]$c.Zone)
-        $zn.Foreground = Brush '#6E6E73'
-        $zn.FontSize = 10
-        $zn.HorizontalAlignment = 'Right'
-        $zn.VerticalAlignment = 'Center'
-        $zn.Margin = '0,0,52,0'
-        [void]$g.Children.Add($zn)
-
-        $del = New-Object System.Windows.Controls.Button
-        $del.Content = '删除'
-        $del.Tag = $idx
-        $del.Width = 44
-        $del.Height = 22
-        $del.Background = 'Transparent'
-        $del.Foreground = Brush '#FF453A'
-        $del.BorderThickness = '0'
-        $del.FontSize = 10.5
-        $del.Cursor = 'Hand'
-        $del.HorizontalAlignment = 'Right'
+        $up = New-ClockRowBtn '↑' $idx '#B0B0B8'
+        $up.Add_Click({ param($s, $ev) Move-Clock ([int]$s.Tag) (-1) })
+        $dn = New-ClockRowBtn '↓' $idx '#B0B0B8'
+        $dn.Add_Click({ param($s, $ev) Move-Clock ([int]$s.Tag) 1 })
+        $del = New-ClockRowBtn '✕' $idx '#FF453A'
         $del.Add_Click({
             param($s, $ev)
             $i = [int]$s.Tag
@@ -2005,9 +2068,27 @@ function Render-ClockList {
                 $ClockHint.Text = '删掉了'
             }
         })
-        [void]$g.Children.Add($del)
+        [void]$右.Children.Add($up)
+        [void]$右.Children.Add($dn)
+        [void]$右.Children.Add($del)
 
-        [void]$ClockList.Children.Add($g)
+        $左 = New-Object System.Windows.Controls.StackPanel
+        $左.VerticalAlignment = 'Center'
+        $nm = New-Object System.Windows.Controls.TextBlock
+        $nm.Text = [string]$c.Name
+        $nm.Foreground = Brush '#FFFFFF'
+        $nm.FontSize = 11.5
+        $zn = New-Object System.Windows.Controls.TextBlock
+        $zn.Text = Get-ZoneLabel ([string]$c.Zone)
+        $zn.Foreground = Brush '#9A9AA2'
+        $zn.FontSize = 9.5
+        $zn.Margin = '0,2,0,0'
+        [void]$左.Children.Add($nm)
+        [void]$左.Children.Add($zn)
+
+        [void]$dp.Children.Add($右)
+        [void]$dp.Children.Add($左)
+        [void]$ClockList.Children.Add($dp)
         $idx++
     }
 }
@@ -2022,21 +2103,27 @@ try {
     })
 } catch {}
 
-try {
-    $ClockZoneInput.Items.Clear()
-    foreach ($z in @($script:ClockZones)) {
-        $it = New-Object System.Windows.Controls.ComboBoxItem
-        $it.Content = Get-ZoneLabel $z
-        $it.Tag = $z
-        [void]$ClockZoneInput.Items.Add($it)
-    }
-    if ($ClockZoneInput.Items.Count -gt 0) { $ClockZoneInput.SelectedIndex = 0 }
-} catch {}
+$script:ZoneIdx = 0
+function Show-ZonePick {
+    try {
+        $list = @($script:ClockZones)
+        if ($list.Count -eq 0) { $ZoneText.Text = '没有可选时区'; return }
+        if ($script:ZoneIdx -lt 0) { $script:ZoneIdx = $list.Count - 1 }
+        if ($script:ZoneIdx -ge $list.Count) { $script:ZoneIdx = 0 }
+        $ZoneText.Text = Get-ZoneLabel ([string]$list[$script:ZoneIdx])
+    } catch {}
+}
+try { $ZonePrev.Add_MouseLeftButtonUp({ $script:ZoneIdx = $script:ZoneIdx - 1; Show-ZonePick }) } catch {}
+try { $ZoneNext.Add_MouseLeftButtonUp({ $script:ZoneIdx = $script:ZoneIdx + 1; Show-ZonePick }) } catch {}
+Show-ZonePick
 
 $ClockAddBtn.Add_Click({
+    $list = @($script:ClockZones)
     $zone = ''
-    $sel = $ClockZoneInput.SelectedItem
-    if ($sel) { $zone = [string]$sel.Tag }
+    if ($list.Count -gt 0) {
+        $k = [Math]::Max(0, [Math]::Min($script:ZoneIdx, $list.Count - 1))
+        $zone = [string]$list[$k]
+    }
     if (-not $zone) { $ClockHint.Text = '先选一个时区'; return }
     $nm = ([string]$ClockNameInput.Text).Trim()
     if (-not $nm) { $nm = $zone.Split('/')[-1] }
@@ -2155,37 +2242,51 @@ function Show-UnlockPatch {
             $uw.Add_MouseLeftButtonUp({
                 param($s, $ev)
                 $ev.Handled = $true
-                # 2026-11-21 KJ：锁定时左半边是「备忘录」（只开详细页，不解锁），右半边才是解锁
-                $x = 0
-                try { $x = $ev.GetPosition($script:UnlockWin).X } catch {}
-                if ($script:PatchMemoW -gt 0 -and $x -lt $script:PatchMemoW) {
-                    Expand-Orb
-                    $script:PeekOpen = $true
-                    Set-ClickThrough $false
-                } else {
-                    $script:Locked = $false
-                    Update-LockUI
+                # 2026-11-23 KJ：锁定时四个按钮都要能点。窗内坐标减掉 5 的边距就是按钮区坐标，
+                # 挨个比对打开时记下的矩形，落在谁身上就执行谁的动作。
+                $ax = 0.0
+                $ay = 0.0
+                try { $pos = $ev.GetPosition($script:UnlockWin); $ax = [double]$pos.X - 5; $ay = [double]$pos.Y - 5 } catch {}
+                $hit = ''
+                try {
+                    foreach ($k in @('Memo', 'Lock', 'Layer', 'Clock')) {
+                        $r = $script:PatchHit[$k]
+                        if (-not $r) { continue }
+                        if ($ax -ge ($r.X - 2) -and $ax -le ($r.X + $r.W + 2) -and $ay -ge ($r.Y - 2) -and $ay -le ($r.Y + $r.H + 2)) { $hit = $k; break }
+                    }
+                } catch {}
+                switch ($hit) {
+                    'Memo'  { Expand-Orb; $script:PeekOpen = $true; Set-ClickThrough $false }
+                    'Lock'  { $script:Locked = $false; Update-LockUI }
+                    'Layer' { Set-OnTop (-not (Get-OnTopActual)) }
+                    'Clock' { Show-WorldClocks (-not $script:ClockOpen) }
                 }
             })
             $script:UnlockWin = $uw
         }
         $脚本 = $script:UnlockWin
-        if ($MemoBtn -and $MemoBtn.ActualWidth -gt 0 -and $LockBtn.ActualWidth -gt 0) {
-            $p1 = $MemoBtn.TranslatePoint((New-Object System.Windows.Point(0, 0)), $w)
-            $p2 = $LockBtn.TranslatePoint((New-Object System.Windows.Point(0, 0)), $w)
-            $script:PatchMemoW = ([double]$MemoBtn.ActualWidth) + 2
-            $脚本.Width  = [double]($p2.X + $LockBtn.ActualWidth - $p1.X) + 10
-            $脚本.Height = [double]([Math]::Max($LockBtn.ActualHeight, $MemoBtn.ActualHeight)) + 10
-            $脚本.Left   = $w.Left + $p1.X - 5
-            $脚本.Top    = $w.Top  + $p1.Y - 5
-        } elseif ($LockBtn.ActualWidth -gt 0) {
-            $p = $LockBtn.TranslatePoint((New-Object System.Windows.Point(0, 0)), $w)
-            $script:PatchMemoW = 0
-            $脚本.Width  = [double]$LockBtn.ActualWidth + 10
-            $脚本.Height = [double]$LockBtn.ActualHeight + 10
-            $脚本.Left   = $w.Left + $p.X - 5
-            $脚本.Top    = $w.Top  + $p.Y - 5
+        $script:PatchHit = @{}
+        $p1 = $MemoBtn.TranslatePoint((New-Object System.Windows.Point(0, 0)), $w)
+        $最大右 = [double]$p1.X
+        $最大下 = [double]$p1.Y
+        foreach ($b in @(@('Memo', $MemoBtn), @('Lock', $LockBtn), @('Layer', $LayerBtn), @('Clock', $ClockBtn))) {
+            $el = $b[1]
+            if (-not $el -or $el.ActualWidth -le 0) { continue }
+            $p = $el.TranslatePoint((New-Object System.Windows.Point(0, 0)), $w)
+            $script:PatchHit[$b[0]] = @{
+                X = ([double]$p.X - [double]$p1.X)
+                Y = ([double]$p.Y - [double]$p1.Y)
+                W = [double]$el.ActualWidth
+                H = [double]$el.ActualHeight
+            }
+            if (($p.X + $el.ActualWidth) -gt $最大右) { $最大右 = $p.X + $el.ActualWidth }
+            if (($p.Y + $el.ActualHeight) -gt $最大下) { $最大下 = $p.Y + $el.ActualHeight }
         }
+        if ($script:PatchHit.Count -eq 0) { return }
+        $脚本.Width  = [double]($最大右 - $p1.X) + 10
+        $脚本.Height = [double]($最大下 - $p1.Y) + 10
+        $脚本.Left   = $w.Left + $p1.X - 5
+        $脚本.Top    = $w.Top  + $p1.Y - 5
         if (-not $脚本.IsVisible) { $脚本.Show() }
     } catch {}
 }
@@ -2210,6 +2311,12 @@ function Update-LockUI {
         Hide-UnlockPatch
     }
 }
+
+# 2026-11-23：脚本执行到这里时窗口还没布局（$app.Run 在最后），按钮的 ActualWidth 还是 0，
+# 补丁窗会算不出矩形而根本不显示 —— 锁定时四个按钮就全点不到。所以等布局完成再刷一次。
+$w.Add_Loaded({
+    try { Update-LockUI } catch {}
+})
 
 function Update-LayerUI {
     $LayerIcon.Foreground = Brush $(if ($script:OnTop) { '#0A84FF' } else { '#5E5E64' })
@@ -3210,7 +3317,14 @@ $w.Add_ContentRendered({
 # metrics refresh every 2s
 $metricTimer = New-Object System.Windows.Threading.DispatcherTimer
 $metricTimer.Interval = [TimeSpan]::FromSeconds(2)
-$metricTimer.Add_Tick({ Update-Orb; Update-WorldClocks })
+$metricTimer.Add_Tick({
+    Update-Orb
+    Update-WorldClocks
+    # 锁定时补丁窗要是没显示出来（首次布局没跑完就会这样），每 2 秒补一次 —— 否则四个按钮一个都点不到。
+    if ($script:Locked) {
+        try { if (-not $script:UnlockWin -or -not $script:UnlockWin.IsVisible) { Show-UnlockPatch } } catch {}
+    }
+})
 $metricTimer.Start()
 
 # ---------------------------------------------------------------- graceful shutdown
@@ -3293,6 +3407,7 @@ function Invoke-CtlCommand([string]$Verb, [string]$Arg) {
         'dump'     { Dump-AgendaUi; Write-CtlResult 'dump' 'ok' }
         'ping'     { Write-CtlResult 'ping' 'ok' }
         'clocks'   { Show-WorldClocks (-not $script:ClockOpen); Write-CtlResult 'clocks' $(if ($script:ClockOpen) { 'on' } else { 'off' }) }
+        'settings' { if (-not $sw.IsVisible) { $sw.Show() | Out-Null }; Select-Pane 'clock'; Render-ClockList; Write-CtlResult 'settings' 'ok' }
         default    { Write-CtlResult $Verb 'unknown' }
     }
 }
