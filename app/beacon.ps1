@@ -2269,6 +2269,13 @@ function Check-FullScreen {
             return
         }
         $script:FullScreen = $fs
+        # 桌面那个小鲲球（desktop-orb）读这个文件来决定要不要吃鼠标 —— 它自己查不了前台窗口。
+        try {
+            $dir = Join-Path $env:USERPROFILE '.dsh\desktop-orb'
+            if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+            $js = '{"fullscreen":' + $(if ($fs) { 'true' } else { 'false' }) + '}'
+            [System.IO.File]::WriteAllText((Join-Path $dir 'fullscreen.json'), $js, (New-Object System.Text.UTF8Encoding($false)))
+        } catch {}
         if ($fs) {
             Set-ClickThrough $true
             [void][FsCheck]::ClipToFullscreen()
