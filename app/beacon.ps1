@@ -1774,8 +1774,7 @@ $SetPosApplyBtn.Add_Click({
 })
 
 $SettingsBtn.Add_Click({
-    if (-not $sw.IsVisible) {
-        $setLeft = $w.Left - 640 - 12
+    if (-not $sw.IsVisible) {        $setLeft = $w.Left - 640 - 12
         if ($setLeft -lt $wa.Left + 8) { $setLeft = $wa.Left + 8 }
         $sw.Left = $setLeft
         $sw.Top  = [math]::Max($wa.Top + 8, [math]::Min($w.Top, $wa.Top + $wa.Height - 620))
@@ -1783,6 +1782,7 @@ $SettingsBtn.Add_Click({
     } else {
         $sw.Activate()
     }
+    try { $sw.Owner = $w } catch {}
     Render-Settings
     Select-Pane $script:SetTab
     if ($script:SetTab -eq 'clock') { Render-ClockList }
@@ -1936,6 +1936,8 @@ function Build-WorldClocks {
             $cw = New-ClockWindow
             $cw.Zone = $id
             $cw.TxtName.Text = $nm
+            # 2026-11-23 KJ：别在 Alt+Tab 里占一堆坑 —— 挂到主窗当 owned window，就只在主窗那一项里。
+            try { $cw.Owner = $w } catch {}
             $script:ClockWins += $cw
         } catch {
             try { [System.IO.File]::WriteAllText((Join-Path $Base 'clock-err.txt'), ($id + ' :: ' + $_.Exception.Message), (New-Object System.Text.UTF8Encoding($false))) } catch {}
