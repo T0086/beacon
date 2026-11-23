@@ -297,6 +297,8 @@ function Save-Notes($items) {
     $obj = [pscustomobject]@{ items = $arr }
     $json = $obj | ConvertTo-Json -Depth 6
     [System.IO.File]::WriteAllText($NotesPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+    # 自己写的盘，别让监视把它当外部改动又读一遍
+    try { $script:NotesStamp = (Get-Item $NotesPath).LastWriteTimeUtc.Ticks } catch {}
 }
 
 $Notes = Load-Notes
@@ -1684,7 +1686,10 @@ $SettingsBtn.Add_Click({
 })
 
 # ---------------------------------------------------------------- lock / layer
-$script:Locked = $false
+# 2026-11-22 KJ：开机默认就是「锁定」——点击穿透，桌面上只留一条淡的条子和右半边解锁键，
+# 想动它就点一下解锁。以前默认是 false（未锁），每次启动都要手动锁一次。
+# 要改回去就把它设回 $false。
+$script:Locked = $true
 $script:OnTop  = $true
 
 Add-Type @"
@@ -2958,6 +2963,27 @@ $timer.Add_Tick({
     if ($script:IsOpen) { Render-Classes }
 })
 $timer.Start()
+
+# 外部写入监视（2026-11-21）：beacon-sync / deadline-to-beacon 改的是磁盘上的 notes.json，
+# 内存里那份还是旧的——下一次 Save-Notes 就会把外部写进来的条目整份覆盖。
+# 11-19 写进 Beacon 的 9 条学校 deadline 就是这么丢的（日志说写成功，第二天全没了）。
+# 每 10 秒比一次 mtime，被外部改过就重读，不等用户下一次操作、也不等 5 分钟那个定时。
+$script:NotesStamp = 0
+try { if (Test-Path $NotesPath) { $script:NotesStamp = (Get-Item $NotesPath).LastWriteTimeUtc.Ticks } } catch {}
+$watchTimer = New-Object System.Windows.Threading.DispatcherTimer
+$watchTimer.Interval = [TimeSpan]::FromSeconds(10)
+$watchTimer.Add_Tick({
+    try {
+        if (-not (Test-Path $NotesPath)) { return }
+        $stamp = (Get-Item $NotesPath).LastWriteTimeUtc.Ticks
+        if ($stamp -ne $script:NotesStamp) {
+            $script:NotesStamp = $stamp
+            Reload-Notes
+            if ($script:IsOpen) { Render-Notes }
+        }
+    } catch {}
+})
+$watchTimer.Start()
 
 # ---------------------------------------------------------------- 22:00 auto refresh of imported sources
 function Refresh-AllSources {
