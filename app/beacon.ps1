@@ -1794,6 +1794,7 @@ $SettingsBtn.Add_Click({
 # 缩小条上的时钟按钮只管开关，不改清单。
 $script:ClockWins  = @()
 $script:ClockOpen  = $false
+$script:ClockResume = $false
 
 $script:ClockZones = @(
     'Europe/London', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore', 'Asia/Bangkok',
@@ -3305,6 +3306,13 @@ function Expand-Orb {
     $OrbView.Visibility = 'Collapsed'
     $PanelView.Visibility = 'Visible'
 
+    # 2026-11-23 KJ：面板一展开，那几个世界时钟的条正好压在面板上。先收起来，
+    # 收起面板时再按原来的开关状态还回去 —— 不能问都不问直接关掉，他可能是特意开着的。
+    if ($script:ClockOpen) {
+        $script:ClockResume = $true
+        try { Show-WorldClocks $false } catch {}
+    }
+
     # the month calendar is the default view whenever the panel opens
     try { Switch-Tab 'month' } catch { Write-Err 'tab' }
 }
@@ -3321,6 +3329,11 @@ function Collapse-Orb {
 
     $PanelView.Visibility = 'Collapsed'
     $OrbView.Visibility = 'Visible'
+    # 展开时被收起来的世界时钟，这里还回去
+    if ($script:ClockResume) {
+        $script:ClockResume = $false
+        try { Show-WorldClocks $true } catch {}
+    }
     # 锁定状态下看过详细页，收起后要恢复穿透
     if ($script:PeekOpen) { $script:PeekOpen = $false; if ($script:Locked) { Set-ClickThrough $true } }
     Save-State
