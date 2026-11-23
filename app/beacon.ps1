@@ -2158,6 +2158,40 @@ public class OrbWin32 {
 }
 "@ -ErrorAction SilentlyContinue
 
+# 全屏检测（2026-11-23 KJ）：玩游戏时鼠标滑出游戏、落到这个条上，很烦。
+# 光看 SHQueryUserNotificationState 不准（桌面上也可能返回 2），所以直接问「前台窗口是不是铺满整个显示器」。
+Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public class FsCheck {
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
+  [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr m, ref MONITORINFO mi);
+  [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  public static bool IsFullscreen() {
+    IntPtr h = GetForegroundWindow();
+    if (h == IntPtr.Zero) return false;
+    var sb = new StringBuilder(256);
+    GetClassName(h, sb, 256);
+    string cls = sb.ToString();
+    if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd") return false;
+    RECT r;
+    if (!GetWindowRect(h, out r)) return false;
+    IntPtr mon = MonitorFromWindow(h, 2);
+    if (mon == IntPtr.Zero) return false;
+    MONITORINFO mi = new MONITORINFO();
+    mi.cbSize = Marshal.SizeOf(mi);
+    if (!GetMonitorInfo(mon, ref mi)) return false;
+    return r.Left <= mi.rcMonitor.Left && r.Top <= mi.rcMonitor.Top
+        && r.Right >= mi.rcMonitor.Right && r.Bottom >= mi.rcMonitor.Bottom;
+  }
+}
+"@ -ErrorAction SilentlyContinue
+
 # WS_EX_TOPMOST on the real window versus $script:OnTop are two different things and they
 # drift: a hidden-then-shown window, a fullscreen app taking the top, a game changing mode.
 # Toggling the cached boolean then costs two clicks - the first one clears a flag that was
@@ -2205,6 +2239,20 @@ function Set-ClickThrough([bool]$on) {
 }
 
 $script:UnlockWin = $null
+
+# 全屏应用/游戏期间强制穿透：不管锁没锁，鼠标都碰不到这个条，游戏也不会被打断。
+# 退出全屏时按当前锁定状态还原。
+$script:FullScreen = $false
+function Check-FullScreen {
+    try {
+        $fs = [bool][FsCheck]::IsFullscreen()
+        if ($fs -eq [bool]$script:FullScreen) { return }
+        $script:FullScreen = $fs
+        if ($fs) { Set-ClickThrough $true }
+        elseif ($script:Locked) { Set-ClickThrough $true }
+        else { Set-ClickThrough $false }
+    } catch {}
+}
 
 # WS_EX_NOACTIVATE (0x08000000): the bar never takes activation, so clicking it
 # while a game is in the foreground no longer pulls focus out of the game.
@@ -3346,6 +3394,7 @@ $metricTimer.Interval = [TimeSpan]::FromSeconds(2)
 $metricTimer.Add_Tick({
     Update-Orb
     Update-WorldClocks
+    Check-FullScreen
     # 锁定时补丁窗要是没显示出来（首次布局没跑完就会这样），每 2 秒补一次 —— 否则四个按钮一个都点不到。
     if ($script:Locked) {
         try { if (-not $script:UnlockWin -or -not $script:UnlockWin.IsVisible) { Show-UnlockPatch } } catch {}
@@ -3434,6 +3483,7 @@ function Invoke-CtlCommand([string]$Verb, [string]$Arg) {
         'ping'     { Write-CtlResult 'ping' 'ok' }
         'clocks'   { Show-WorldClocks (-not $script:ClockOpen); Write-CtlResult 'clocks' $(if ($script:ClockOpen) { 'on' } else { 'off' }) }
         'settings' { if (-not $sw.IsVisible) { $sw.Show() | Out-Null }; try { $sw.Owner = $w } catch {}; Set-ToolWindowFor $sw; Select-Pane 'clock'; Render-ClockList; Write-CtlResult 'settings' 'ok' }
+        'fullscreen' { Check-FullScreen; Write-CtlResult 'fullscreen' $(if ($script:FullScreen) { 'on' } else { 'off' }) }
         default    { Write-CtlResult $Verb 'unknown' }
     }
 }
