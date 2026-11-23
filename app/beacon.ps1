@@ -2172,23 +2172,40 @@ public class FsCheck {
   [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
   [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr m, ref MONITORINFO mi);
   [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool ClipCursor(ref RECT r);
+  [DllImport("user32.dll")] public static extern bool ClipCursor(IntPtr r);
   public static bool IsFullscreen() {
+    RECT r;
+    return GetFullscreenRect(out r);
+  }
+  public static bool GetFullscreenRect(out RECT r) {
+    r = new RECT();
     IntPtr h = GetForegroundWindow();
     if (h == IntPtr.Zero) return false;
     var sb = new StringBuilder(256);
     GetClassName(h, sb, 256);
     string cls = sb.ToString();
     if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd") return false;
-    RECT r;
-    if (!GetWindowRect(h, out r)) return false;
+    RECT wr;
+    if (!GetWindowRect(h, out wr)) return false;
     IntPtr mon = MonitorFromWindow(h, 2);
     if (mon == IntPtr.Zero) return false;
     MONITORINFO mi = new MONITORINFO();
     mi.cbSize = Marshal.SizeOf(mi);
     if (!GetMonitorInfo(mon, ref mi)) return false;
-    return r.Left <= mi.rcMonitor.Left && r.Top <= mi.rcMonitor.Top
-        && r.Right >= mi.rcMonitor.Right && r.Bottom >= mi.rcMonitor.Bottom;
+    bool full = wr.Left <= mi.rcMonitor.Left && wr.Top <= mi.rcMonitor.Top
+             && wr.Right >= mi.rcMonitor.Right && wr.Bottom >= mi.rcMonitor.Bottom;
+    if (!full) return false;
+    r = mi.rcMonitor;
+    return true;
   }
+  // 全屏时把光标锁在那块屏幕上：鼠标滑不出去，游戏不会因为光标跑到副屏而丢操作。
+  public static bool ClipToFullscreen() {
+    RECT r;
+    if (!GetFullscreenRect(out r)) return false;
+    return ClipCursor(ref r);
+  }
+  public static void Unclip() { ClipCursor(IntPtr.Zero); }
 }
 "@ -ErrorAction SilentlyContinue
 
@@ -2246,11 +2263,20 @@ $script:FullScreen = $false
 function Check-FullScreen {
     try {
         $fs = [bool][FsCheck]::IsFullscreen()
-        if ($fs -eq [bool]$script:FullScreen) { return }
+        if ($fs -eq [bool]$script:FullScreen) {
+            # 全屏中每拍续一次锁：游戏自己也可能把裁剪清掉
+            if ($fs) { [void][FsCheck]::ClipToFullscreen() }
+            return
+        }
         $script:FullScreen = $fs
-        if ($fs) { Set-ClickThrough $true }
-        elseif ($script:Locked) { Set-ClickThrough $true }
-        else { Set-ClickThrough $false }
+        if ($fs) {
+            Set-ClickThrough $true
+            [void][FsCheck]::ClipToFullscreen()
+        } else {
+            try { [FsCheck]::Unclip() } catch {}
+            if ($script:Locked) { Set-ClickThrough $true }
+            else { Set-ClickThrough $false }
+        }
     } catch {}
 }
 
@@ -3394,7 +3420,6 @@ $metricTimer.Interval = [TimeSpan]::FromSeconds(2)
 $metricTimer.Add_Tick({
     Update-Orb
     Update-WorldClocks
-    Check-FullScreen
     # 锁定时补丁窗要是没显示出来（首次布局没跑完就会这样），每 2 秒补一次 —— 否则四个按钮一个都点不到。
     if ($script:Locked) {
         try { if (-not $script:UnlockWin -or -not $script:UnlockWin.IsVisible) { Show-UnlockPatch } } catch {}
@@ -3407,6 +3432,8 @@ $metricTimer.Start()
 # ghost. Every shutdown path therefore funnels through this one function.
 function Invoke-BeaconStop {
     try { Save-State } catch {}
+    # 全局光标裁剪是进程外的东西，退出前一定要还回去，否则鼠标永远出不了那块屏
+    try { [FsCheck]::Unclip() } catch {}
     try { foreach ($cw in @($script:ClockWins)) { $cw.Close() } } catch {}
     # 正常退出：清掉 lock，下次启动才不算「意外退出」
     try { Remove-Item (Join-Path $Base 'ctl\running.lock') -Force -ErrorAction SilentlyContinue } catch {}
@@ -3418,6 +3445,12 @@ function Invoke-BeaconStop {
     try { [System.Windows.Application]::Current.Shutdown() } catch {}
     [Environment]::Exit(0)
 }
+
+# 全屏检测跑快一点（300ms）：游戏一打到全屏就得马上锁住光标，晚了鼠标已经溜到副屏。
+$fsTimer = New-Object System.Windows.Threading.DispatcherTimer
+$fsTimer.Interval = [TimeSpan]::FromMilliseconds(300)
+$fsTimer.Add_Tick({ Check-FullScreen })
+$fsTimer.Start()
 
 # graceful shutdown channel: writing quit.flag lets a restart dispose the tray icon
 # properly instead of leaving a ghost behind (Stop-Process can't clean up NotifyIcon)
