@@ -1783,6 +1783,7 @@ $SettingsBtn.Add_Click({
         $sw.Activate()
     }
     try { $sw.Owner = $w } catch {}
+    Set-ToolWindowFor $sw
     Render-Settings
     Select-Pane $script:SetTab
     if ($script:SetTab -eq 'clock') { Render-ClockList }
@@ -1976,6 +1977,7 @@ function Show-WorldClocks([bool]$on) {
         if ($script:ClockWins.Count -eq 0) { Build-WorldClocks }
         foreach ($cw in @($script:ClockWins)) {
             try { if (-not $cw.IsVisible) { $cw.Show() } } catch { $日志 += ('|EX:' + $_.Exception.Message) }
+            Set-ToolWindowFor $cw
             $日志 += ('|' + $cw.Zone + ' vis=' + $cw.IsVisible + ' txt=' + [string]$cw.TxtTime.Text + ' @' + [int]$cw.Left + ',' + [int]$cw.Top + ' ' + [int]$cw.Width + 'x' + [int]$cw.Height)
         }
         Update-WorldClocks
@@ -2219,15 +2221,20 @@ function Set-NoActivate {
 # WS_EX_TOOLWINDOW (0x80): 工具窗不进 Alt+Tab、也不进任务栏。
 # 2026-11-23 KJ：主窗和它那几个钟表窗在 Alt+Tab 里各占一格，烦。把主窗也标成工具窗，
 # 连带 owned window 一起，Alt+Tab 里就彻底没有 beacon 了。
-function Set-ToolWindow {
+function Set-ToolWindowFor($win) {
     try {
-        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
+        if (-not $win) { return }
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($win)).Handle
         if ($hwnd -eq [IntPtr]::Zero) { return }
         $ex = [int][OrbWin32]::GetWindowLong($hwnd, -20)
         $ex = ($ex -bor 0x00000080) -band (-bnot 0x00040000)
         [void][OrbWin32]::SetWindowLong($hwnd, -20, $ex)
         $script:ToolWindow = $true
     } catch {}
+}
+
+function Set-ToolWindow {
+    Set-ToolWindowFor $w
 }
 
 $w.Add_SourceInitialized({ Set-NoActivate; if ($script:OnTop) { Set-OnTop $true } })
@@ -2304,6 +2311,8 @@ function Show-UnlockPatch {
         $脚本.Left   = $w.Left + $p1.X - 5
         $脚本.Top    = $w.Top  + $p1.Y - 5
         if (-not $脚本.IsVisible) { $脚本.Show() }
+        # 2026-11-23：补丁窗也是顶层窗，不设工具样式就会在 Alt+Tab 里单独占一项。
+        Set-ToolWindowFor $脚本
     } catch {}
 }
 
@@ -3424,7 +3433,7 @@ function Invoke-CtlCommand([string]$Verb, [string]$Arg) {
         'dump'     { Dump-AgendaUi; Write-CtlResult 'dump' 'ok' }
         'ping'     { Write-CtlResult 'ping' 'ok' }
         'clocks'   { Show-WorldClocks (-not $script:ClockOpen); Write-CtlResult 'clocks' $(if ($script:ClockOpen) { 'on' } else { 'off' }) }
-        'settings' { if (-not $sw.IsVisible) { $sw.Show() | Out-Null }; Select-Pane 'clock'; Render-ClockList; Write-CtlResult 'settings' 'ok' }
+        'settings' { if (-not $sw.IsVisible) { $sw.Show() | Out-Null }; try { $sw.Owner = $w } catch {}; Set-ToolWindowFor $sw; Select-Pane 'clock'; Render-ClockList; Write-CtlResult 'settings' 'ok' }
         default    { Write-CtlResult $Verb 'unknown' }
     }
 }
