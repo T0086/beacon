@@ -341,7 +341,7 @@ function Format-DueShort($key) {
 
 function Load-State {
     $s = @{ Left = $null; Top = $null; GpuPick = 'auto'; WeatherLat = $null; WeatherLon = $null
-            PosPin = $false; PosLeft = $null; PosTop = $null; Clocks = @() }
+            PosPin = $false; PosLeft = $null; PosTop = $null; Clocks = @(); ClockOpen = $true }
     if (Test-Path $StatePath) {
         try {
             $o = Get-Content $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -353,6 +353,8 @@ function Load-State {
             if ("$($o.PosPin)" -eq 'True') { $s.PosPin = $true }
             if ($null -ne $o.PosLeft -and "$($o.PosLeft)") { $s.PosLeft = [double]$o.PosLeft }
             if ($null -ne $o.PosTop -and "$($o.PosTop)") { $s.PosTop = [double]$o.PosTop }
+            # 时间模块（2026-11-24 KJ：启动就有）：缺省 true，只有明确存成 false 才关。
+            if ("$($o.ClockOpen)" -eq 'False') { $s.ClockOpen = $false }
             # 世界时钟清单（2026-11-23）：[{Name, Zone}]，Zone 是 Windows 时区 ID。
             # PS 5.1 的 ConvertFrom-Json 会把单元素数组还原成对象，所以外面一律 @() 再包一层。
             if ($null -ne $o.Clocks) {
@@ -378,6 +380,7 @@ function Save-State {
         PosLeft    = $script:PosLeft
         PosTop     = $script:PosTop
         Clocks     = @(@($script:Clocks) | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Zone = [string]$_.Zone } })
+        ClockOpen  = [bool]$script:ClockOpen
     }
     [System.IO.File]::WriteAllText($StatePath, ($o | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -929,7 +932,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.11 · 日程 · 硬件监控 · 天气" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.12 · 日程 · 硬件监控 · 天气 · 世界时钟" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -1090,6 +1093,8 @@ if ($script:Clocks.Count -eq 0) {
         @{ Name = '多伦多';   Zone = 'America/Toronto' }
     )
 }
+# 时间模块开机默认亮着；用户在面板里关掉后，下次启动就按他关掉的样子来
+$script:ClocksOpen = [bool]$state.ClockOpen
 # 固定位置优先：勾了「固定」就用那组坐标，不再跟随上次拖动
 if ($script:PosPin -and $null -ne $script:PosLeft -and $null -ne $script:PosTop) {
     $w.Left = $script:PosLeft
@@ -1793,7 +1798,7 @@ $SettingsBtn.Add_Click({
 # 每个地区一个独立小窗，横排在缩小条下面。加一个地区就多一个窗，删了就少一个；
 # 缩小条上的时钟按钮只管开关，不改清单。
 $script:ClockWins  = @()
-$script:ClockOpen  = $false
+$script:ClockOpen  = $script:ClocksOpen
 $script:ClockResume = $false
 
 $script:ClockZones = @(
@@ -1971,7 +1976,7 @@ function Update-WorldClocks {
     }
 }
 
-function Show-WorldClocks([bool]$on) {
+function Show-WorldClocks([bool]$on, [bool]$persist = $false) {
     $script:ClockOpen = $on
     $日志 = ''
     if ($on) {
@@ -1995,6 +2000,9 @@ function Show-WorldClocks([bool]$on) {
             (New-Object System.Text.UTF8Encoding($false)))
     } catch {}
     try { $ClockIcon.Foreground = Brush $(if ($on) { '#0A84FF' } else { '#7A7A80' }) } catch {}
+    # 只有用户自己开关（按钮 / ctl）才落盘；展开面板时的临时收起不算，
+    # 否则中途崩一次就把「关掉」记进 state，下次启动时间模块就没了。
+    if ($persist) { try { Save-State } catch {} }
 }
 
 function New-ClockRowBtn([string]$txt, [int]$tag, [string]$color) {
@@ -2099,7 +2107,7 @@ function Render-ClockList {
 }
 
 $ClockBtn.Add_MouseLeftButtonUp({
-    Show-WorldClocks (-not $script:ClockOpen)
+    Show-WorldClocks (-not $script:ClockOpen) -persist $true
 })
 
 try {
@@ -2200,12 +2208,9 @@ public class FsCheck {
     r = mi.rcMonitor;
     return true;
   }
-  // 全屏时把光标锁在那块屏幕上：鼠标滑不出去，游戏不会因为光标跑到副屏而丢操作。
-  public static bool ClipToFullscreen() {
-    RECT r;
-    if (!GetFullscreenRect(out r)) return false;
-    return ClipCursor(ref r);
-  }
+  // 只保留解锁：以前这里还有个 ClipToFullscreen 把光标锁进全屏那块屏，
+  // 副作用是全屏软件下鼠标出不了那块显示器（2026-11-23 KJ 报的），已删。
+  // 要「鼠标别落到条上」用 Set-ClickThrough 就够，不需要碰光标本身。
   public static void Unclip() { ClipCursor(IntPtr.Zero); }
 }
 "@ -ErrorAction SilentlyContinue
@@ -2264,11 +2269,7 @@ $script:FullScreen = $false
 function Check-FullScreen {
     try {
         $fs = [bool][FsCheck]::IsFullscreen()
-        if ($fs -eq [bool]$script:FullScreen) {
-            # 全屏中每拍续一次锁：游戏自己也可能把裁剪清掉
-            if ($fs) { [void][FsCheck]::ClipToFullscreen() }
-            return
-        }
+        if ($fs -eq [bool]$script:FullScreen) { return }
         $script:FullScreen = $fs
         # 桌面那个小鲲球（desktop-orb）读这个文件来决定要不要吃鼠标 —— 它自己查不了前台窗口。
         try {
@@ -2279,7 +2280,6 @@ function Check-FullScreen {
         } catch {}
         if ($fs) {
             Set-ClickThrough $true
-            [void][FsCheck]::ClipToFullscreen()
         } else {
             try { [FsCheck]::Unclip() } catch {}
             if ($script:Locked) { Set-ClickThrough $true }
@@ -2364,7 +2364,7 @@ function Show-UnlockPatch {
                     'Memo'  { Expand-Orb; $script:PeekOpen = $true; Set-ClickThrough $false }
                     'Lock'  { $script:Locked = $false; Update-LockUI }
                     'Layer' { Set-OnTop (-not (Get-OnTopActual)) }
-                    'Clock' { Show-WorldClocks (-not $script:ClockOpen) }
+                    'Clock' { Show-WorldClocks (-not $script:ClockOpen) -persist $true }
                 }
             })
             $script:UnlockWin = $uw
@@ -2424,6 +2424,11 @@ function Update-LockUI {
 $w.Add_Loaded({
     try { Update-LockUI } catch {}
     Set-ToolWindow
+    # 2026-11-24 KJ：时间模块「启动就有」—— 开机按 state 记的开关直接亮出来，
+    # 不用再去点那个时钟按钮。关掉过的人下次启动仍然是收着的。
+    if ($script:ClockOpen) {
+        try { Show-WorldClocks $true } catch { Write-Err 'clocks' }
+    }
 })
 
 function Update-LayerUI {
@@ -3534,7 +3539,7 @@ function Invoke-CtlCommand([string]$Verb, [string]$Arg) {
         'refresh'  { Reload-Notes; if ($script:IsOpen) { Render-Classes; Render-Notes }; Write-CtlResult 'refresh' 'ok' }
         'dump'     { Dump-AgendaUi; Write-CtlResult 'dump' 'ok' }
         'ping'     { Write-CtlResult 'ping' 'ok' }
-        'clocks'   { Show-WorldClocks (-not $script:ClockOpen); Write-CtlResult 'clocks' $(if ($script:ClockOpen) { 'on' } else { 'off' }) }
+        'clocks'   { Show-WorldClocks (-not $script:ClockOpen) -persist $true; Write-CtlResult 'clocks' $(if ($script:ClockOpen) { 'on' } else { 'off' }) }
         'settings' { if (-not $sw.IsVisible) { $sw.Show() | Out-Null }; try { $sw.Owner = $w } catch {}; Set-ToolWindowFor $sw; Select-Pane 'clock'; Render-ClockList; Write-CtlResult 'settings' 'ok' }
         'fullscreen' { Check-FullScreen; Write-CtlResult 'fullscreen' $(if ($script:FullScreen) { 'on' } else { 'off' }) }
         default    { Write-CtlResult $Verb 'unknown' }
