@@ -353,8 +353,9 @@ function Load-State {
             if ("$($o.PosPin)" -eq 'True') { $s.PosPin = $true }
             if ($null -ne $o.PosLeft -and "$($o.PosLeft)") { $s.PosLeft = [double]$o.PosLeft }
             if ($null -ne $o.PosTop -and "$($o.PosTop)") { $s.PosTop = [double]$o.PosTop }
-            # 时间模块（2026-11-24 KJ：启动就有）：缺省 true，只有明确存成 false 才关。
-            if ("$($o.ClockOpen)" -eq 'False') { $s.ClockOpen = $false }
+            # 时间模块（2026-11-24 KJ：启动就有）：**不看存档，永远启动即开**。
+            # 之前那版会用存档里的 false 把默认顶掉，导致关过一次之后每次启动都是关的——KJ 17:49 反馈的就是这个。
+            $s.ClockOpen = $true
             # 世界时钟清单（2026-11-23）：[{Name, Zone}]，Zone 是 Windows 时区 ID。
             # PS 5.1 的 ConvertFrom-Json 会把单元素数组还原成对象，所以外面一律 @() 再包一层。
             if ($null -ne $o.Clocks) {
@@ -380,7 +381,6 @@ function Save-State {
         PosLeft    = $script:PosLeft
         PosTop     = $script:PosTop
         Clocks     = @(@($script:Clocks) | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Zone = [string]$_.Zone } })
-        ClockOpen  = [bool]$script:ClockOpen
     }
     [System.IO.File]::WriteAllText($StatePath, ($o | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -932,7 +932,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.12 · 日程 · 硬件监控 · 天气 · 世界时钟" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.13 · 日程 · 硬件监控 · 天气 · 世界时钟" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -1093,7 +1093,7 @@ if ($script:Clocks.Count -eq 0) {
         @{ Name = '多伦多';   Zone = 'America/Toronto' }
     )
 }
-# 时间模块开机默认亮着；用户在面板里关掉后，下次启动就按他关掉的样子来
+# 时间模块每次启动都亮着；面板里关掉只影响本次运行，不写存档（KJ 2026-11-24 定：启动就有）
 $script:ClocksOpen = [bool]$state.ClockOpen
 # 固定位置优先：勾了「固定」就用那组坐标，不再跟随上次拖动
 if ($script:PosPin -and $null -ne $script:PosLeft -and $null -ne $script:PosTop) {
