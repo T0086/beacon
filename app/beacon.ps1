@@ -932,7 +932,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.14 · 日程 · 硬件监控 · 天气 · 世界时钟" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.15 · 日程 · 硬件监控 · 天气 · 世界时钟" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -1927,6 +1927,8 @@ function New-ClockWindow {
     [void]($cw | Add-Member -NotePropertyName TxtName -NotePropertyValue $tName   -Force)
     [void]($cw | Add-Member -NotePropertyName TxtTime -NotePropertyValue $tTime   -Force)
     [void]($cw | Add-Member -NotePropertyName TxtDay  -NotePropertyValue $tDay    -Force)
+    # 小窗只显示不接点击：一建出来就打上穿透，别等下一次 Update-ClickThrough
+    $cw.Add_SourceInitialized({ param($s, $e) try { Set-WinTransparent $s $true } catch {} })
     return $cw
 }
 
@@ -1984,6 +1986,7 @@ function Show-WorldClocks([bool]$on, [bool]$persist = $false) {
         foreach ($cw in @($script:ClockWins)) {
             try { if (-not $cw.IsVisible) { $cw.Show() } } catch { $日志 += ('|EX:' + $_.Exception.Message) }
             Set-ToolWindowFor $cw
+            Set-WinTransparent $cw $true
             $日志 += ('|' + $cw.Zone + ' vis=' + $cw.IsVisible + ' txt=' + [string]$cw.TxtTime.Text + ' @' + [int]$cw.Left + ',' + [int]$cw.Top + ' ' + [int]$cw.Width + 'x' + [int]$cw.Height)
         }
         Update-WorldClocks
@@ -2255,20 +2258,31 @@ function Set-OnTop([bool]$on) {
 # while everything else on the bar lets the mouse reach the app underneath.
 $script:ClickThrough = $false
 
-function Set-ClickThrough([bool]$on) {
+# 2026-11-25 KJ：时钟那三条小窗也挡鼠标。它们只是显示，没有任何点击行为，挡在桌面上
+# 纯粹是白吃别家窗口的点击 —— 所以小窗一律穿透，不跟锁定状态联动。
+function Set-WinTransparent($win, [bool]$on) {
     try {
-        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
-        # 2026-11-25：窗口还没建时 Handle 是 Zero，SetWindowLong 静默失败，旧代码却已经把
-        # $script:ClickThrough 记成 true —— 之后每次调用都被这个缓存挡住，锁着的那条就再也不穿透了。
-        # 现在两件事都改了：没句柄就直接返回、不写缓存；缓存也不再当判据，直接看窗口上的实况位。
+        if (-not $win) { return }
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($win)).Handle
         if ($hwnd -eq [IntPtr]::Zero) { return }
         $ex = [int][OrbWin32]::GetWindowLong($hwnd, -20)
         $cur = (($ex -band 0x00000020) -ne 0)
-        $script:ClickThrough = $cur
         if ($cur -eq $on) { return }
         if ($on) { $ex = $ex -bor 0x00000020 } else { $ex = $ex -band (-bnot 0x00000020) }
         [void][OrbWin32]::SetWindowLong($hwnd, -20, $ex)
-        $script:ClickThrough = $on
+    } catch {}
+}
+
+function Set-ClickThrough([bool]$on) {
+    try {
+        # 2026-11-25：窗口还没建时 Handle 是 Zero，SetWindowLong 静默失败，旧代码却已经把
+        # $script:ClickThrough 记成 true —— 之后每次调用都被这个缓存挡住，锁着的那条就再也不穿透了。
+        # 现在统一走 Set-WinTransparent（没句柄不写），缓存只从窗口实况读回来，不再当判据。
+        Set-WinTransparent $w $on
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
+        if ($hwnd -ne [IntPtr]::Zero) {
+            $script:ClickThrough = ((([int][OrbWin32]::GetWindowLong($hwnd, -20)) -band 0x00000020) -ne 0)
+        }
     } catch {}
 }
 
@@ -2278,6 +2292,8 @@ function Set-ClickThrough([bool]$on) {
 $script:PeekOpen = $false
 function Update-ClickThrough {
     try { Set-ClickThrough ((-not $script:IsOpen) -and ($script:FullScreen -or $script:Locked)) } catch {}
+    # 世界时钟小窗永远穿透（只显示、不接点击），新建的、刚 Show 出来的都在这条线上对齐
+    foreach ($cw in @($script:ClockWins)) { Set-WinTransparent $cw $true }
 }
 
 $script:UnlockWin = $null
