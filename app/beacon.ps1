@@ -932,7 +932,7 @@ $settingsXaml = @'
             <StackPanel x:Name="SetPaneAbout" Visibility="Collapsed">
               <TextBlock Text="日程球 Beacon" Foreground="#F5F5F7" FontSize="14" FontWeight="SemiBold"
                          Margin="0,4,0,4"/>
-              <TextBlock Text="v1.0.13 · 日程 · 硬件监控 · 天气 · 世界时钟" Foreground="#6E6E73"
+              <TextBlock Text="v1.0.14 · 日程 · 硬件监控 · 天气 · 世界时钟" Foreground="#6E6E73"
                          FontSize="10.5" TextWrapping="Wrap"/>
               <Border Margin="0,16,0,0" CornerRadius="9" Background="#12FFFFFF" Padding="12,10">
                 <StackPanel>
@@ -2183,6 +2183,7 @@ public class FsCheck {
   [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] public static extern bool ClipCursor(ref RECT r);
   [DllImport("user32.dll")] public static extern bool ClipCursor(IntPtr r);
+  [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
   public static bool IsFullscreen() {
     RECT r;
     return GetFullscreenRect(out r);
@@ -2191,6 +2192,10 @@ public class FsCheck {
     r = new RECT();
     IntPtr h = GetForegroundWindow();
     if (h == IntPtr.Zero) return false;
+    // 2026-11-25：最大化 ≠ 全屏。最大化的窗口比显示器大 8px（实测 Chrome 是 -8,-8,1928,1088），
+    // 四条边都盖住了显示器，于是「最大化着看网页」被当成全屏，穿透一路开着 —— KJ 报的
+    // 「锁着打开月历关不掉」就是这么来的。IsZoomed 只对最大化窗口为真，全屏游戏/F11 不受影响。
+    if (IsZoomed(h)) return false;
     var sb = new StringBuilder(256);
     GetClassName(h, sb, 256);
     string cls = sb.ToString();
@@ -2251,14 +2256,28 @@ function Set-OnTop([bool]$on) {
 $script:ClickThrough = $false
 
 function Set-ClickThrough([bool]$on) {
-    if ($script:ClickThrough -eq $on) { return }
     try {
         $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($w)).Handle
+        # 2026-11-25：窗口还没建时 Handle 是 Zero，SetWindowLong 静默失败，旧代码却已经把
+        # $script:ClickThrough 记成 true —— 之后每次调用都被这个缓存挡住，锁着的那条就再也不穿透了。
+        # 现在两件事都改了：没句柄就直接返回、不写缓存；缓存也不再当判据，直接看窗口上的实况位。
+        if ($hwnd -eq [IntPtr]::Zero) { return }
         $ex = [int][OrbWin32]::GetWindowLong($hwnd, -20)
+        $cur = (($ex -band 0x00000020) -ne 0)
+        $script:ClickThrough = $cur
+        if ($cur -eq $on) { return }
         if ($on) { $ex = $ex -bor 0x00000020 } else { $ex = $ex -band (-bnot 0x00000020) }
         [void][OrbWin32]::SetWindowLong($hwnd, -20, $ex)
         $script:ClickThrough = $on
     } catch {}
+}
+
+# 2026-11-25：「该不该穿透」只在这里算，别在各个入口各写一遍（以前就写漏过入口）。
+#   面板开着 -> 永不穿透。这条是硬规矩：面板一旦穿透，✕ 点不动，只能杀进程。
+#   收起一条 -> 全屏 或 锁定 才穿透。
+$script:PeekOpen = $false
+function Update-ClickThrough {
+    try { Set-ClickThrough ((-not $script:IsOpen) -and ($script:FullScreen -or $script:Locked)) } catch {}
 }
 
 $script:UnlockWin = $null
@@ -2278,13 +2297,8 @@ function Check-FullScreen {
             $js = '{"fullscreen":' + $(if ($fs) { 'true' } else { 'false' }) + '}'
             [System.IO.File]::WriteAllText((Join-Path $dir 'fullscreen.json'), $js, (New-Object System.Text.UTF8Encoding($false)))
         } catch {}
-        if ($fs) {
-            Set-ClickThrough $true
-        } else {
-            try { [FsCheck]::Unclip() } catch {}
-            if ($script:Locked) { Set-ClickThrough $true }
-            else { Set-ClickThrough $false }
-        }
+        if (-not $fs) { try { [FsCheck]::Unclip() } catch {} }
+        Update-ClickThrough
     } catch {}
 }
 
@@ -2361,7 +2375,7 @@ function Show-UnlockPatch {
                     }
                 } catch {}
                 switch ($hit) {
-                    'Memo'  { Expand-Orb; $script:PeekOpen = $true; Set-ClickThrough $false }
+                    'Memo'  { Expand-Orb }
                     'Lock'  { $script:Locked = $false; Update-LockUI }
                     'Layer' { Set-OnTop (-not (Get-OnTopActual)) }
                     'Clock' { Show-WorldClocks (-not $script:ClockOpen) -persist $true }
@@ -2402,14 +2416,24 @@ function Hide-UnlockPatch {
     try { if ($script:UnlockWin) { $script:UnlockWin.Hide() } } catch {}
 }
 
+# 2026-11-25：收起那一刻窗口刚从 380x560 变回 448x76，布局还没跑，按钮的坐标还是展开时的
+# （实测补丁窗落到 y=255 而不是 13）。所以不立即算，等一帧之后再算。
+$script:PatchFix = New-Object System.Windows.Threading.DispatcherTimer
+$script:PatchFix.Interval = [TimeSpan]::FromMilliseconds(150)
+$script:PatchFix.Add_Tick({
+    $script:PatchFix.Stop()
+    if ($script:Locked -and -not $script:IsOpen) { try { Show-UnlockPatch } catch {} }
+})
+
 function Update-LockUI {
     if ($script:Locked) {
         $LockIcon.Text = [string][char]0xE72E
         $LockIcon.Foreground = Brush '#FF9F0A'
         # locked: fade the bar down so underlying content stays readable
         try { $OrbView.Background = Brush '#8C161920' } catch {}
-        Show-UnlockPatch
-        Set-ClickThrough $true
+        # 面板开着就先收起补丁窗，再统一按规矩算穿透（Update-ClickThrough）
+        if ($script:IsOpen) { Hide-UnlockPatch } else { Show-UnlockPatch }
+        Update-ClickThrough
     } else {
         $LockIcon.Text = [string][char]0xE785
         $LockIcon.Foreground = Brush '#7A7A80'
@@ -3279,6 +3303,12 @@ function Expand-Orb {
 
     $script:IsOpen = $true
 
+    # 2026-11-25 KJ：锁着的时候从托盘 / 托盘左键 / ctl 展开，主窗仍是穿透的，✕ 点不动。
+    # 只有点补丁窗里那几个按钮才会顺手解除穿透，别的入口全漏。所以统一放在这里：
+    # 锁着展开 = 临时看一眼（peek），必须可点；收起时 Collapse-Orb 会把穿透还回去。
+    if ($script:Locked) { $script:PeekOpen = $true; Hide-UnlockPatch }
+    Update-ClickThrough
+
     # 收起时的条是锚：面板怎么摆都从它算，收起时原样还回去。
     $script:BarLeft = $w.Left
     $script:BarTop  = $w.Top
@@ -3339,8 +3369,10 @@ function Collapse-Orb {
         $script:ClockResume = $false
         try { Show-WorldClocks $true } catch {}
     }
-    # 锁定状态下看过详细页，收起后要恢复穿透
-    if ($script:PeekOpen) { $script:PeekOpen = $false; if ($script:Locked) { Set-ClickThrough $true } }
+    # 收起后回到「锁着的那条」：穿透和补丁窗都要还回去，否则锁着却一个按钮都点不到
+    $script:PeekOpen = $false
+    Update-ClickThrough
+    if ($script:Locked) { try { $script:PatchFix.Stop(); $script:PatchFix.Start() } catch {} }
     Save-State
     Update-Orb
 }
@@ -3446,9 +3478,13 @@ $metricTimer.Add_Tick({
     Update-Orb
     Update-WorldClocks
     # 锁定时补丁窗要是没显示出来（首次布局没跑完就会这样），每 2 秒补一次 —— 否则四个按钮一个都点不到。
-    if ($script:Locked) {
+    # 面板开着时不补：那时窗口本来就该能点，补丁窗只会压在面板上吃点击。
+    if ($script:Locked -and -not $script:IsOpen) {
         try { if (-not $script:UnlockWin -or -not $script:UnlockWin.IsVisible) { Show-UnlockPatch } } catch {}
     }
+    # 不变量：穿透 ⟺ 锁着且收着。窗口样式会被 WPF 重建窗口、全屏切换、手滑的开关悄悄改掉，
+    # 每 2 秒按实况对一次，比在各种入口各修一遍可靠。全屏期间交给 Check-FullScreen 管，别抢。
+    Update-ClickThrough
 })
 $metricTimer.Start()
 
@@ -3542,6 +3578,7 @@ function Invoke-CtlCommand([string]$Verb, [string]$Arg) {
         'clocks'   { Show-WorldClocks (-not $script:ClockOpen) -persist $true; Write-CtlResult 'clocks' $(if ($script:ClockOpen) { 'on' } else { 'off' }) }
         'settings' { if (-not $sw.IsVisible) { $sw.Show() | Out-Null }; try { $sw.Owner = $w } catch {}; Set-ToolWindowFor $sw; Select-Pane 'clock'; Render-ClockList; Write-CtlResult 'settings' 'ok' }
         'fullscreen' { Check-FullScreen; Write-CtlResult 'fullscreen' $(if ($script:FullScreen) { 'on' } else { 'off' }) }
+        'state'    { Write-CtlResult 'state' ("locked=" + $script:Locked + " open=" + $script:IsOpen + " ct=" + $script:ClickThrough + " fs=" + $script:FullScreen + " peek=" + $script:PeekOpen + " patch=" + $(if ($script:UnlockWin) { [string]$script:UnlockWin.IsVisible } else { 'none' })) }
         default    { Write-CtlResult $Verb 'unknown' }
     }
 }
